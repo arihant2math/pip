@@ -41,7 +41,8 @@ a second agent try to refute each finding"*.
   hash(prompt + opts) plus an occurrence count. After an abort or crash, running the same script again in the same session
   reuses finished agents. `fresh: true` turns this off.
 - **No recursion.** Workflow agents get `PI_WORKFLOW_CHILD=1` and every subagent gets `PI_SUBAGENT_DEPTH>0`, so neither
-  gets the `workflow` tool.
+  gets the `workflow` tool. Workflow agents also don't get `agent` or `send_message`: the script does the fan-out.
+  They still get background `bash` with `task_output`/`task_stop`.
 - **No confirmation prompt.** That follows pi's no-permission-popups default. Gate the tool with a `tool_call` hook if you want one.
 
 ## Script API

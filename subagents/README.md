@@ -59,7 +59,7 @@ If an allowlist doesn't include `agent`, that agent can't spawn subagents of its
 | `PI_MAX_CONCURRENT_SUBAGENTS` | 20 | The error message tells the model not to retry |
 
 Background agents in non-interactive runs have a 30-minute time limit (`PI_BACKGROUND_TIME_LIMIT_MS`).
-Subagents never get the `workflow` tool.
+Subagents never get the `workflow` tool, and workflow agents (`PI_WORKFLOW_CHILD=1`) never get `agent` or `send_message`.
 
 ## Notes
 

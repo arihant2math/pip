@@ -9,7 +9,9 @@
  *
  * Subagent sessions persist under ~/.pi/agent/subagents/<parent session id>/, so `send_message`
  * can resume a finished agent with its full history. Nesting is capped by PI_SUBAGENT_MAX_DEPTH
- * (default 3): at the limit the `agent` tool is not registered.
+ * (default 3): at the limit the `agent` tool is not registered. Workflow subagents (PI_WORKFLOW_CHILD)
+ * never get `agent`/`send_message`: the workflow script does the fan-out, and the tool definitions
+ * would cost ~950 prompt tokens in every workflow agent.
  */
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
@@ -89,7 +91,7 @@ async function settleWorktree(wt: NonNullable<AgentLaunch["worktree"]>): Promise
 
 export default function (pi: ExtensionAPI) {
 	installTaskCore(pi);
-	if (SUBAGENT_DEPTH >= MAX_SUBAGENT_DEPTH) return;
+	if (SUBAGENT_DEPTH >= MAX_SUBAGENT_DEPTH || process.env.PI_WORKFLOW_CHILD) return;
 	const registry = taskRegistry();
 
 	const runningAgents = () => registry.list().filter((t) => t.kind === "agent" && t.running).length;
