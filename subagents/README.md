@@ -65,4 +65,3 @@ Subagents never get the `workflow` tool.
 
 - Children are plain `pi` processes, so they load your installed packages and AGENTS.md.
 - Install this package with `pi install` instead of loading it with `-e`. Then subagents also get background commands and can nest.
-- `../subagent-guard.ts`, which tells the model to shell out to `pi -p`, does the same job as this package. Don't load both.

@@ -2,7 +2,7 @@
   "name": "pip",
   "version": "0.1.0",
   "private": true,
-  "description": "Claude Code-style features for pi: background commands, subagents, dynamic workflows (sharing one task system)",
+  "description": "Claude Code-style features for pi: background commands, subagents, dynamic workflows (sharing one task system), Claude Code OAuth compatibility",
   "type": "module",
   "keywords": ["pi-package"],
   "license": "MIT",
@@ -10,7 +10,8 @@
     "extensions": [
       "./background-commands/index.ts",
       "./subagents/index.ts",
-      "./dynamic-workflows/index.ts"
+      "./dynamic-workflows/index.ts",
+      "./pi-claude-code-use/extensions/index.ts"
     ]
   },
   "peerDependencies": {
