@@ -18,13 +18,13 @@ When Pi is using Anthropic OAuth, this extension intercepts outbound API request
 - **tool_choice remapping** -- if `tool_choice` references a flat name that was remapped, the reference is updated to the MCP alias. If it references a tool that was filtered out, `tool_choice` is removed from the payload.
 - **Message history rewriting** -- `tool_use` blocks in conversation history that reference remapped flat names are rewritten to their MCP aliases so the model sees consistent tool names across the conversation.
 - **Transcript tool updates** (Pi >= 0.86) -- rewrites native `tool_addition` and `tool_removal` references to the same names as their tool definitions. Flat tools and their aliases share one wire tool: duplicate changes are merged, and removing a flat source does not disable an alias that remains selected. References to filtered tools are removed. Initial tool activation, deferred declarations, and cache metadata are preserved. If an entire update disappears, its cache breakpoint moves to the nearest preceding eligible user or system content, preserving the original TTL unless that content already has a breakpoint. Effort-only messages are retained.
-- **Dynamic alias registration** -- at session start and before each agent turn, reads Pi's live tool registry via `getAllTools()` and registers a schema-only MCP alias for every non-core flat tool, from any extension. This includes tools that other extensions register from lifecycle hooks (e.g. `pi-web-providers`), with no hardcoded extension list to maintain.
+- **Provider-scoped alias registration** -- under Anthropic OAuth, reads Pi's live tool registry via `getAllTools()` and registers inactive, model-only MCP aliases for non-core flat tools. This includes tools registered from other extensions' lifecycle hooks, with no hardcoded extension list. Outside OAuth, existing owned aliases are hidden and removed from the active loadout; unrelated MCP tools are untouched.
 - **Managed tool-call unaliasing** -- when the model calls an MCP alias registered by this extension, rewrites the finalized `toolCall` name back to the original flat tool name during `message_end`, before Pi resolves execution. Direct MCP tools from other extensions are left untouched.
 - **Compact alias result rendering** -- while a call streams under its `mcp__` alias name (before the `message_end` rewrite), the alias row renders results with a compact generic renderer: fully assembled output, including MIME-derived image placeholders, is normalized for the terminal before truncation and styling (ANSI CSI/OSC sequences in ESC and 8-bit C1 forms, remaining C0/C1 controls except tab/LF, DEL, and carriage returns are stripped) and collapsed to 3 lines / 2000 characters with a keybinding-aware `to expand` hint. Partial (streaming) results render the same way as they arrive. Inline images are left to Pi's tool row; a textual image placeholder appears only when images are hidden or the terminal cannot show them.
-- **Alias activation tracking** -- auto-activates MCP aliases when their flat counterpart is active under Anthropic OAuth. Tracks provenance (auto-managed vs user-selected) so that disabling OAuth only removes auto-activated aliases, preserving any the user explicitly enabled.
+- **Provider-scoped alias activation** -- activates aliases for active flat source tools only under Anthropic OAuth. Reconciles after startup/reload/resume/fork, model selection, tree navigation, and before agent turns. No owned alias remains exposed outside OAuth, including aliases restored from a transcript or explicitly selected by the user. Explicit alias-only selections normalize to their canonical source tool when it is registered, non-hidden, and allowed by the tool selection. Returning to OAuth mirrors that resulting loadout; no separate alias preferences are suspended.
 - **Displayed prose un-cloaking** (Pi >= 0.84) -- the model sees MCP aliases on the wire, so its prose mentions them ("I'll call `mcp__exa_mcp__web_search_exa`") even though the transcript renders tool calls under their flat names. A registered markdown transformer rewrites alias mentions in displayed assistant text (including thinking and streaming updates) back to the flat source names. This is display-only: the session file and the model's context keep the original text, only whole-token mentions of aliases registered by this extension are rewritten (foreign `mcp__` tools are untouched), and user messages are never modified. On Pi versions before 0.84 the transformer is simply not registered.
 
-Non-OAuth Anthropic usage and non-Anthropic providers are left completely unchanged.
+Non-OAuth Anthropic usage and non-Anthropic providers receive no compatibility payload rewrites or active compatibility aliases. Original tools and foreign MCP tools remain available according to their existing selection.
 
 ## Install
 
@@ -68,7 +68,7 @@ PI_CLAUDE_CODE_USE_DEBUG_LOG=/tmp/pi-claude-debug.log pi -e /path/to/extensions/
 
 Anthropic's OAuth subscription endpoint refuses flat-named custom tools but accepts any name shaped like `mcp__<server>__<tool>` (it does not validate that a real MCP server exists). Instead of maintaining a hardcoded list of known extensions, `pi-claude-code-use` derives an MCP alias for every non-core flat tool in Pi's live registry:
 
-1. At `session_start` and `before_agent_start`, it calls `pi.getAllTools()` and inspects each tool's `sourceInfo`.
+1. While Anthropic OAuth is selected, lifecycle reconciliation calls `pi.getAllTools()` and inspects each tool's `sourceInfo`.
 2. The `<server>` segment is derived from where the tool came from, in priority order:
    - Pi built-in / SDK synthetic sources → `pi`
    - npm installs → the unscoped package name from the `node_modules` path (e.g. `@benvargas/pi-exa-mcp` → `exa_mcp`)
@@ -76,9 +76,9 @@ Anthropic's OAuth subscription endpoint refuses flat-named custom tools but acce
    - directory-based extensions → the nearest non-generic directory name (skipping `extensions`, `src`, `dist`, `lib`, `build`, `out`)
    A leading `pi-` prefix is stripped and the segment is sanitized to `[a-z0-9_]`.
 3. The alias is `mcp__<server>__<tool>` (sanitized, capped at Anthropic's 128-char limit). Name collisions are resolved deterministically with numeric suffixes (`_2`, `_3`, ...) in sorted flat-name order; derived names never shadow an existing tool.
-4. A schema-only alias tool is registered carrying the source tool's parameter schema, description, and prompt guidelines. Its `execute` is a stub: when the assistant calls a managed alias, `pi-claude-code-use` rewrites the finalized `toolCall` back to the original flat name during `message_end`, before Pi resolves execution, so the source extension's original `execute` closure and state always run. Aliases are re-registered if the source tool's schema changes mid-session, and every alias keeps a permanent reverse route so stale aliases (after config changes) still resolve to their source tool.
+4. A schema-only alias tool is registered inactive with model-only exposure, carrying the source tool's parameter schema, description, and prompt guidelines. Model-only exposure prevents codemode or nested tool execution from invoking the alias stub. Its `execute` is a stub: when the assistant calls a managed alias, `pi-claude-code-use` rewrites the finalized `toolCall` back to the original flat name during `message_end`, before Pi resolves execution, so the source extension's original `execute` closure and state always run. Aliases are re-registered if the source tool's schema changes mid-session, and every alias keeps a permanent reverse route so stale aliases (after config changes) still resolve to their source tool.
 
-Alias passes run at `session_start`, `before_agent_start`, and `before_provider_request` (OAuth requests only). The last pass catches tools that another extension registers from its own `before_agent_start` handler after this extension's handler already ran, so those tools are aliased in-payload on their first turn instead of the second.
+Lifecycle reconciliation runs at `session_start`, `model_select`, `session_tree`, and `before_agent_start`. Alias registration also runs at `before_provider_request` for OAuth requests only, without activating newly registered aliases after payload assembly. The last pass catches tools that another extension registers from its own `before_agent_start` handler after this extension's handler already ran, so those tools are aliased in-payload on their first turn instead of the second.
 
 Examples with the companion extensions from this monorepo installed via npm:
 
@@ -141,7 +141,19 @@ Examples:
 
 That said, flat-named tools no longer require any special handling: `pi-claude-code-use` automatically derives and registers an MCP-style alias for every non-core flat tool it finds in Pi's registry, including tools registered from lifecycle hooks. Registering directly under an MCP-style name simply avoids the aliasing layer entirely.
 
+## Testing
+
+Run the mocked-API lifecycle and payload regression tests with Node.js 22.19 or newer:
+
+```bash
+npm --prefix pi-claude-code-use test  # from the monorepo root
+# or: npm test                     # from this package directory
+```
+
 ## Known Limitations
+
+- Requires Pi >= 0.99.0 for inactive registration and tool exposure controls.
+- Provider gating uses the selected model and its authentication state. The current `before_provider_request` API does not expose the dispatched physical model, so virtual-model routing across providers requires upstream request-model metadata for fully request-specific gating.
 
 Pi's `getAllTools()` exposes each tool's name, description, parameter schema, prompt guidelines, and source metadata — but not the full `ToolDefinition`. As a result, alias tools do not carry:
 
