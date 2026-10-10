@@ -46,14 +46,11 @@ interface AgentLaunch {
 
 type Details = TaskSnapshot & { usage?: Usage; resultPreview?: string };
 
-const TOOL_DESCRIPTION = (defs: AgentDefinition[]) => `Launch a subagent: a separate pi process with its own fresh context window that works on a task autonomously and returns only its final report.
-Use it to keep large searches, logs and multi-step side work out of your context, to run independent work in parallel (several agent calls in one message run concurrently), or to use a specialized agent type. Don't use it for a single quick file read or grep.
-The subagent sees ONLY your prompt: include the goal, relevant paths and context, constraints, and exactly what to report back.
-Foreground (default) blocks until the agent finishes. run_in_background: true returns at once; you get a <task-notification> with its report when it finishes, so don't poll it or duplicate its work meanwhile.
-Each result includes an agent id; send_message({to: id, message}) continues that agent with its full history.
-isolation: "worktree" runs it in a temporary git worktree (removed if it changes nothing).
+const TOOL_DESCRIPTION = (defs: AgentDefinition[]) => `Launch a subagent: a separate pi process with a fresh context that works autonomously and returns only its final report.
+Use it for broad searches, noisy side work, or independent tasks in parallel (several calls in one message run concurrently); not for a single quick read or grep. It sees only your prompt: include the goal, paths, context, constraints and what to report.
+run_in_background: true returns at once and delivers a <task-notification> with the report; don't poll or duplicate its work. Continue a finished agent with send_message({to: id, message}).
 
-Agent types (subagent_type, default general-purpose):
+Types (subagent_type, default general-purpose):
 ${describeAgents(defs)}`;
 
 function sessionDir(ctx: ExtensionContext): string {
@@ -209,14 +206,14 @@ export default function (pi: ExtensionAPI) {
 				"Delegate broad codebase searches and self-contained side tasks to subagents (agent tool) to keep your context small; launch independent agents in parallel in one message.",
 			],
 			parameters: Type.Object({
-				description: Type.String({ description: "Short (3-6 word) label for the task" }),
-				prompt: Type.String({ description: "The complete task. The subagent sees nothing else, so include all needed context and what to report." }),
-				subagent_type: Type.Optional(Type.String({ description: "Agent type from the list; default general-purpose" })),
-				run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately; get a <task-notification> with the report later" })),
-				model: Type.Optional(Type.String({ description: "Model override, e.g. anthropic/claude-haiku-4-5. Default: the agent type's model, else yours" })),
-				thinking: Type.Optional(Type.String({ description: "Thinking level override: off, minimal, low, medium, high, xhigh" })),
-				isolation: Type.Optional(Type.Literal("worktree", { description: "Run in a temporary git worktree" })),
-				cwd: Type.Optional(Type.String({ description: "Working directory (default: yours)" })),
+				description: Type.String({ description: "Short (3-6 word) label" }),
+				prompt: Type.String({ description: "The complete, self-contained task" }),
+				subagent_type: Type.Optional(Type.String()),
+				run_in_background: Type.Optional(Type.Boolean()),
+				model: Type.Optional(Type.String({ description: "provider/id override" })),
+				thinking: Type.Optional(Type.String({ description: "off, minimal, low, medium, high or xhigh" })),
+				isolation: Type.Optional(Type.Literal("worktree", { description: "Run in a temporary git worktree (removed if unchanged)" })),
+				cwd: Type.Optional(Type.String()),
 			}),
 			async execute(_id, params, signal, onUpdate, ctx) {
 				const def = findAgent(params.subagent_type, ctx.cwd, ctx.isProjectTrusted());

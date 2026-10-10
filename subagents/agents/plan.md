@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Read-only research agent for planning. Investigates the codebase and returns an implementation plan (files to change, approach, risks, verification steps). Cannot modify files.
+description: Read-only; investigates the code and returns an implementation plan (files to change, approach, risks, verification).
 tools: read, grep, find, ls, bash
 ---
 

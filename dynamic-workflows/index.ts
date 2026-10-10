@@ -35,20 +35,14 @@ const AGENT_TIMEOUT = 30 * 60_000;
 
 const SUBAGENT_PROMPT = `You are a subagent inside an automated workflow. Nobody will reply to you. Do the task, then end with a final message containing only the result the orchestrator asked for: self-contained, concise, no preamble.`;
 
-const DESCRIPTION = `Run a dynamic workflow: a JavaScript orchestration script that fans work out to isolated pi subagents and returns one result. Only the script's return value enters your context.
-Use when the user asks for a workflow, or the task has many independent items (~10+), needs enforced verification (adversarial review, fact-checking, refuting findings), or is a repeatable process. Costs many tokens; do not use for small tasks (use the agent tool for one or a few subagents).
-
-Script: async function body (top-level await/return). \`export const meta = {name, description}\` is allowed. Globals:
-- agent(prompt, opts?) -> Promise<string|object|null>. Fresh subagent with a clean context: it sees ONLY prompt, so include paths, criteria and output format. Returns its final message, or null on failure. opts: label, agent (subagent type, e.g. "explore": its system prompt, tools and model become the defaults), schema (JSON Schema; returns a validated object), model ("provider/id"), thinking, tools (allowlist, e.g. ["read","grep","find","ls"] for read-only), cwd, timeout (ms).
-- parallel(items) -> Promise.all over promises or thunks; failures become null.
-- pipeline(items, ...stages) -> each item flows through stages independently: stage(prev, item, i). An item stops (null) at the first stage that fails or returns null.
-- phase(name), log(...args): progress display only.
-- sh(cmd) -> stdout string, throws on non-zero exit. For cheap deterministic work (git ls-files, running tests).
-- args: the args parameter (any JSON value; pass objects as objects).
-Agents beyond the concurrency limit queue. Filter/dedupe/loop in plain JS. Return compact data; per-agent outputs are saved in the run dir if you need them later.
-run_in_background: true returns a task id at once and sends a <task-notification> with the result when the workflow finishes.
-Re-running the identical script+args reuses finished agent results (resume after abort); fresh:true disables that.
-Saved workflows live in .pi/workflows/<name>.js or ~/.pi/agent/workflows/<name>.js; run one with {name}. To save a workflow, write the script there. Bundled: review (adversarially verified code review; args: what to review as text, or {task, cwd}).`;
+const DESCRIPTION = `Run a JavaScript orchestration script that fans work out to isolated pi subagents; only its return value enters your context. Use for many (~10+) independent items, enforced verification (adversarial review, fact-checking), or repeatable processes. Costly: for one or a few subagents use agent.
+Script: async function body (top-level await/return; \`export const meta = {name}\` allowed). Globals:
+- agent(prompt, opts?) -> final message, or null on failure. The subagent sees only prompt. opts: label, agent (subagent type whose settings become defaults), schema (JSON Schema -> validated object), model, thinking, tools (allowlist), cwd, timeout (ms).
+- parallel(items): Promise.all over promises/thunks; failures become null.
+- pipeline(items, ...stages): stage(prev, item, i); an item stops at the first stage that fails or returns null.
+- phase(name), log(...); sh(cmd) -> stdout (throws on failure); args.
+Return compact data; agent outputs are saved in the run dir. Identical re-runs reuse cached agent results (fresh: true disables).
+Saved workflows: run {name} from .pi/workflows/ or ~/.pi/agent/workflows/ (save by writing <name>.js there). Bundled: review (args: what to review, or {task, cwd}).`;
 
 type AgentOpts = {
 	label?: string;
@@ -126,11 +120,11 @@ export default function (pi: ExtensionAPI) {
 		description: DESCRIPTION,
 		promptSnippet: "Run a JS orchestration script that fans out to many isolated subagents",
 		parameters: Type.Object({
-			script: Type.Optional(Type.String({ description: "Orchestration script (JavaScript)" })),
-			name: Type.Optional(Type.String({ description: "Run a saved workflow by name instead of script" })),
-			args: Type.Optional(Type.Any({ description: "Value exposed to the script as `args`" })),
-			fresh: Type.Optional(Type.Boolean({ description: "Ignore cached agent results from a previous identical run" })),
-			run_in_background: Type.Optional(Type.Boolean({ description: "Return at once; get a <task-notification> with the result later" })),
+			script: Type.Optional(Type.String({ description: "JavaScript" })),
+			name: Type.Optional(Type.String({ description: "Saved workflow name" })),
+			args: Type.Optional(Type.Any({ description: "Exposed to the script as `args`" })),
+			fresh: Type.Optional(Type.Boolean({ description: "Ignore cached agent results" })),
+			run_in_background: Type.Optional(Type.Boolean({ description: "Return now; <task-notification> with the result later" })),
 		}),
 
 		async execute(_id, params, signal, onUpdate, ctx) {

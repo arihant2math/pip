@@ -1,6 +1,6 @@
 ---
 name: explore
-description: Fast read-only agent for searching and understanding a codebase (find files, trace code paths, answer "where/how is X done"). Say how thorough to be in the prompt - quick, medium, or very thorough. Cannot modify files.
+description: Fast read-only codebase search (find files, trace code, answer "where/how is X done"). Say how thorough (quick, medium or very thorough).
 tools: read, grep, find, ls, bash
 ---
 
