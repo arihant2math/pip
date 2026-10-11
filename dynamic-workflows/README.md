@@ -5,14 +5,6 @@ The model writes a short JavaScript script that fans work out to isolated `pi` s
 result. The plan lives in code, not the context window, so every item gets the same treatment, verification
 always runs, and scripts can be saved and rerun.
 
-```
-pi install ./pip                        # with background-commands and subagents (recommended)
-pi install ./pip/dynamic-workflows      # alone; still needs ../shared next to it
-```
-
-Example: *"use a workflow to audit every route handler for missing auth checks, and have a second agent
-try to refute each finding"*.
-
 ## Design
 
 - **One tool, `workflow`.** No commands, modes, or settings. Its ~2 KB description lists the whole API.

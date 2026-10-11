@@ -51,15 +51,10 @@ Claude Code tool names (`Read`, `Grep`, `Glob`, `Bash`, `WebFetch`, …) map to 
 
 ## Limits
 
-| Setting | Default | Notes |
-|---|---|---|
-| `PI_SUBAGENT_MAX_DEPTH` | 3 | Children get `PI_SUBAGENT_DEPTH`; at the limit, `agent` isn't registered |
-| `PI_MAX_CONCURRENT_SUBAGENTS` | 20 | The error tells the model not to retry |
+| Setting                       | Default | Notes                                                                    |
+|-------------------------------|---------|--------------------------------------------------------------------------|
+| `PI_SUBAGENT_MAX_DEPTH`       | 3       | Children get `PI_SUBAGENT_DEPTH`; at the limit, `agent` isn't registered |
+| `PI_MAX_CONCURRENT_SUBAGENTS` | 20      | The error tells the model not to retry                                   |
 
 Background agents in non-interactive runs time out after 30 minutes (`PI_BACKGROUND_TIME_LIMIT_MS`).
 Subagents never get `workflow`; workflow agents (`PI_WORKFLOW_CHILD=1`) never get `agent` or `send_message`.
-
-## Notes
-
-- Children are plain `pi` processes and load your installed packages and AGENTS.md.
-- Install with `pi install` rather than `-e` so subagents also get background commands and can nest.

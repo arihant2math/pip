@@ -3,10 +3,6 @@
 Claude Code-style background shell commands for pi. Replaces the built-in `bash` tool with pi's own
 definition (same process handling, truncation and renderer) plus a task layer.
 
-```
-pi install ./pip            # everything (recommended), or: pi install ./pip/background-commands
-```
-
 ## Model-facing
 
 - **`bash` with `run_in_background: true`**: returns a task id (`b…`) and output file immediately.
