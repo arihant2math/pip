@@ -12,9 +12,20 @@ A task can block a tool call or run in the background. When a background task fi
 | [`shared/`](shared/README.md)                           | Task registry, notifications, `task_output`/`task_stop`, `/tasks`, the widget, the `pi -p` subagent runner                                                                                        |
 | [`pi-claude-code-use/`](pi-claude-code-use/README.md)   | Vendored [@benvargas/pi-claude-code-use](https://github.com/ben-vargas/pi-packages): patches Anthropic OAuth payloads and aliases extension tools as `mcp__*` (standalone, doesn't use `shared/`) |
 
+## Installation
+
+From a local clone:
+
+```shell
+pi install ./pip
 ```
-pi install ./pip                 # all packages (package.json lists them)
-pi -e ./pip/background-commands -e ./pip/subagents -e ./pip/dynamic-workflows -e ./pip/pi-claude-code-use   # try for one run
+
+## Experimentation
+
+```shell
+pi -e ./pip/background-commands -e ./pip/subagents -e ./pip/dynamic-workflows -e ./pip/pi-claude-code-use
 ```
+
+## Development
 
 Typecheck: `npx -p typescript tsc -p .`.
