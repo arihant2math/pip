@@ -14,6 +14,12 @@ A task can block a tool call or run in the background. When a background task fi
 
 ## Installation
 
+From git:
+
+```shell
+pi install git:github.com/arihant2math/pip
+```
+
 From a local clone:
 
 ```shell
