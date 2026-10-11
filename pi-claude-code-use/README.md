@@ -51,12 +51,12 @@ No extra configuration is required.
 
 ## Environment Variables
 
-| Variable | Description |
-|---|---|
-| `PI_CLAUDE_CODE_USE_DEBUG_LOG` | Set to a file path to enable debug logging. Writes two JSON entries per Anthropic OAuth request: one with `"stage": "before"` (the original payload from Pi) and one with `"stage": "after"` (the transformed payload sent to Anthropic). |
-| `PI_CLAUDE_CODE_USE_DISABLE_TOOL_FILTER` | Set to `1` to disable tool filtering. System prompt rewriting still applies, but all tools pass through unchanged. Useful for debugging whether a tool-filtering issue is causing a problem. |
-| `PI_CLAUDE_CODE_USE_DISABLE_AUTO_ALIAS` | Set to `1` to disable automatic alias derivation. Only user-configured `toolAliases` are registered; other flat-named tools are filtered out on Anthropic OAuth requests as before. |
-| `PI_CLAUDE_CODE_USE_DISABLE_PROSE_UNALIAS` | Set to `1` to disable displayed prose un-cloaking, showing assistant text exactly as the model wrote it (with `mcp__` alias names). Useful when debugging the aliasing layer itself, e.g. checking which names the model actually uses. |
+| Variable                                   | Description                                                                                                                                                                                                                               |
+|--------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `PI_CLAUDE_CODE_USE_DEBUG_LOG`             | Set to a file path to enable debug logging. Writes two JSON entries per Anthropic OAuth request: one with `"stage": "before"` (the original payload from Pi) and one with `"stage": "after"` (the transformed payload sent to Anthropic). |
+| `PI_CLAUDE_CODE_USE_DISABLE_TOOL_FILTER`   | Set to `1` to disable tool filtering. System prompt rewriting still applies, but all tools pass through unchanged. Useful for debugging whether a tool-filtering issue is causing a problem.                                              |
+| `PI_CLAUDE_CODE_USE_DISABLE_AUTO_ALIAS`    | Set to `1` to disable automatic alias derivation. Only user-configured `toolAliases` are registered; other flat-named tools are filtered out on Anthropic OAuth requests as before.                                                       |
+| `PI_CLAUDE_CODE_USE_DISABLE_PROSE_UNALIAS` | Set to `1` to disable displayed prose un-cloaking, showing assistant text exactly as the model wrote it (with `mcp__` alias names). Useful when debugging the aliasing layer itself, e.g. checking which names the model actually uses.   |
 
 Example:
 
