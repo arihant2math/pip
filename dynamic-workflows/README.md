@@ -1,49 +1,45 @@
 # Dynamic Workflows
 
-Pi's version of Claude Code's [dynamic workflows](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code).
-The model writes a short JavaScript orchestration script. The script sends work to isolated `pi`
-subagents and returns one result. The plan lives in code instead of the context window, so every
-item gets the same treatment, verification always runs, and you can save the script and run it again.
+Claude Code's [dynamic workflows](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code) for pi.
+The model writes a short JavaScript script that fans work out to isolated `pi` subagents and returns one
+result. The plan lives in code, not the context window, so every item gets the same treatment, verification
+always runs, and scripts can be saved and rerun.
 
 ```
 pi install ./pip                        # with background-commands and subagents (recommended)
-pi install ./pip/dynamic-workflows      # or just this; it still needs ../shared next to it
+pi install ./pip/dynamic-workflows      # alone; still needs ../shared next to it
 ```
 
-Then ask for one: *"use a workflow to audit every route handler for missing auth checks, and have
-a second agent try to refute each finding"*.
+Example: *"use a workflow to audit every route handler for missing auth checks, and have a second agent
+try to refute each finding"*.
 
 ## Design
 
-- **One tool, `workflow`, and no commands, modes, or settings.** Its description is about 2 KB and lists the whole API.
-- **The subagent is `pi -p --mode json --no-session`**, run by the shared runner (`../shared/pi-runner.ts`,
-  also used by the `agent` tool). No new agent runtime: subagents get your extensions, AGENTS.md, and the
-  session's model and thinking level by default.
-- **Agent types are reused.** `agent(prompt, { agent: "explore" })` uses that subagent type's system prompt,
+- **One tool, `workflow`.** No commands, modes, or settings. Its ~2 KB description lists the whole API.
+- **Subagents are `pi -p --mode json --no-session`**, run by the shared runner (`../shared/pi-runner.ts`,
+  also used by `agent`). They get your extensions, AGENTS.md, and the session's model and thinking level by default.
+- **Agent types are reused.** `agent(prompt, { agent: "explore" })` takes that type's system prompt,
   tools and model as defaults (see `../subagents/README.md`).
-- **A run is a task.** It goes into the shared task registry, so `run_in_background: true` returns a task id at once
-  and delivers a `<task-notification>` with the result when the run finishes. Ctrl+B backgrounds a running
-  workflow, `/tasks` lists and stops it, and `task_stop`/`task_output` work on it. Progress is written to
-  `progress.log` in the run dir.
-- **Structured output uses pi's own tool validation.** With `schema`, the subagent gets one extra tool
-  (`../shared/submit-result.ts` → `submit_result`) whose parameters *are* that schema. The parent takes the result only from a
-  `submit_result` call that passed validation and ran (the tool echoes its coerced params in `details`), then
-  stops the subagent. If the subagent finishes cleanly but replies in text, the extension parses JSON out of it
-  and validates it against the same schema; anything that doesn't match becomes `null`.
-- **Transient provider errors are not failures.** An agent fails only if its *last* assistant message errored
+- **A run is a task** in the shared registry. `run_in_background: true` returns a task id and later delivers a
+  `<task-notification>` with the result. Ctrl+B, `/tasks`, `task_stop` and `task_output` all work on it.
+  Progress is written to `progress.log` in the run dir.
+- **Structured output uses pi's tool validation.** With `schema`, the subagent gets a `submit_result` tool
+  (`../shared/submit-result.ts`) whose parameters are that schema. The parent accepts only a validated, executed
+  `submit_result` call (its coerced params are echoed in `details`), then stops the subagent. If the subagent
+  answers in text instead, JSON is parsed from it and validated against the schema; anything invalid becomes `null`.
+- **Transient provider errors aren't failures.** An agent fails only if its last assistant message errored
   (pi auto-retries overloads/5xx), it timed out, or the process exited non-zero.
-- **The script runs in `node:vm`.** It gets a clean scope, not a security boundary; pi already runs tools with your permissions.
+- **Scripts run in `node:vm`**: a clean scope, not a security boundary (pi tools already run with your permissions).
 - **Context stays small.** Only the script's return value reaches the model, truncated at 12k chars.
-  Each agent's prompt and output, the full result, and the cache go to a run directory on disk, and its path
-  appears in the result so the model can `read` it when needed. Progress (phases, agent statuses, logs, cost)
-  goes to the TUI through `onUpdate` and never enters the model's context.
-- **Resume is a content-addressed cache.** Run id = hash(script + args). Each agent result is keyed by
-  hash(prompt + opts) plus an occurrence count. After an abort or crash, running the same script again in the same session
-  reuses finished agents. `fresh: true` turns this off.
-- **No recursion.** Workflow agents get `PI_WORKFLOW_CHILD=1` and every subagent gets `PI_SUBAGENT_DEPTH>0`, so neither
-  gets the `workflow` tool. Workflow agents also don't get `agent` or `send_message`: the script does the fan-out.
-  They still get background `bash` with `task_output`/`task_stop`.
-- **No confirmation prompt.** That follows pi's no-permission-popups default. Gate the tool with a `tool_call` hook if you want one.
+  Agent prompts and outputs, the full result and the cache are written to a run directory whose path is in the
+  result. Progress (phases, agent statuses, logs, cost) goes to the TUI via `onUpdate`, not the model's context.
+- **Resume uses a content-addressed cache.** Run id = hash(script + args); each agent result is keyed by
+  hash(prompt + opts) plus an occurrence count. Rerunning the same script in the same session after an abort or
+  crash reuses finished agents. `fresh: true` disables this.
+- **No recursion.** Workflow agents get `PI_WORKFLOW_CHILD=1` and all subagents get `PI_SUBAGENT_DEPTH>0`, so neither
+  gets `workflow`. Workflow agents also lack `agent` and `send_message`, since the script does the fan-out.
+  They keep background `bash`, `task_output` and `task_stop`.
+- **No confirmation prompt**, per pi's no-popups default. Gate it with a `tool_call` hook if needed.
 
 ## Script API
 
@@ -59,36 +55,34 @@ args                                     // the tool's `args` parameter (a JSON-
 return value                             // the only thing the model sees
 ```
 
-- `tools: ["read","grep","find","ls"]` gives a read-only agent. `tools: []` gives an agent with no tools.
-- Concurrency defaults to `min(8, cpus)` (`PI_WORKFLOW_CONCURRENCY`). A run is capped at 500 agents
-  (`PI_WORKFLOW_MAX_AGENTS`), and each agent times out after 30 minutes.
-- By default the tool call blocks the turn while the workflow runs, and Esc aborts it and kills every subagent.
-  With `run_in_background: true`, or after Ctrl+B, it keeps running while you keep working. Use `task_stop <id>` or
-  `/tasks` to stop it.
+- `tools: ["read","grep","find","ls"]` makes a read-only agent; `tools: []` an agent with no tools.
+- Concurrency defaults to `min(8, cpus)` (`PI_WORKFLOW_CONCURRENCY`). Runs are capped at 500 agents
+  (`PI_WORKFLOW_MAX_AGENTS`); each agent times out after 30 minutes.
+- By default the call blocks the turn, and Esc aborts it and kills all subagents. With `run_in_background: true`
+  or after Ctrl+B it runs while you work; stop it with `task_stop <id>` or `/tasks`.
 
 ## Saved workflows
 
-`workflow({ name, args })` looks up `<name>.js` in these directories, in order:
+`workflow({ name, args })` looks for `<name>.js` in, in order:
 
-1. `.pi/workflows/` (project; only when the project is trusted, like project extensions)
+1. `.pi/workflows/` (project; trusted projects only, like project extensions)
 2. `~/.pi/agent/workflows/` (user)
 3. `workflows/` in this package (bundled)
 
-To save one, ask the model to write the script to one of those directories. The bundled
-[`workflows/review.js`](workflows/review.js) runs a scope → review → adversarial verify pipeline.
-It works as a template for other workflows.
+To save one, have the model write the script to one of these. The bundled [`workflows/review.js`](workflows/review.js)
+(scope → review → adversarial verify) doubles as a template.
 
 ## Patterns
 
 - **Fan-out and synthesize:** `parallel(items.map(i => () => agent(...)))`, then merge in JS or with one final agent.
-- **Adversarial verification:** for each finding, a skeptic `agent` with a `{real, reason}` schema. Keep only the findings that survive.
-- **Generate and filter / tournament:** N agents attempt the task, and pairwise judge agents pick the winner in a JS loop.
+- **Adversarial verification:** per finding, a skeptic `agent` with a `{real, reason}` schema; keep the survivors.
+- **Generate and filter / tournament:** N agents attempt the task; pairwise judge agents pick a winner in a JS loop.
 - **Loop until done:** `while (true) { const r = await agent(...); if (!r.new.length) break; }`.
-- **Cheap stages on cheap models:** `{ model: "google/gemini-3.5-flash" }` for extraction, and the session model for judgment.
+- **Cheap models for cheap stages:** `{ model: "google/gemini-3.5-flash" }` for extraction, the session model for judgment.
 
 ## Files
 
 - `index.ts`: the extension (tool, runtime, renderer)
-- `../shared/`: the subagent runner, `submit_result`, agent types and the task registry (shared with background-commands and subagents)
-- `workflows/review.js`: the bundled example
-- `tsconfig.json`: local typecheck only (`npx -p typescript tsc -p .`, or `-p ..` for all of pip). Its paths point at the Homebrew pi install
+- `../shared/`: subagent runner, `submit_result`, agent types, task registry (shared with background-commands and subagents)
+- `workflows/review.js`: bundled example
+- `tsconfig.json`: local typecheck only (`npx -p typescript tsc -p .`, or `-p ..` for all of pip); paths point at the Homebrew pi install

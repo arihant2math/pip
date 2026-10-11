@@ -1,51 +1,50 @@
 # Background Commands
 
-Claude Code-style background shell commands for pi. This replaces the built-in `bash` tool with
-pi's own definition (same process handling, truncation and renderer) and adds a task layer on top.
+Claude Code-style background shell commands for pi. Replaces the built-in `bash` tool with pi's own
+definition (same process handling, truncation and renderer) plus a task layer.
 
 ```
 pi install ./pip            # everything (recommended), or: pi install ./pip/background-commands
 ```
 
-## What the model gets
+## Model-facing
 
-- **`bash` with `run_in_background: true`**: returns at once with a task id (`b…`) and an output file.
-  The model gets a `<task-notification>` when the command exits, so it never has to poll.
-- **Auto-background on timeout**: a foreground command still running after its `timeout` (default
-  120s) moves to the background instead of being killed. Commands starting with `sleep` are still killed.
-  When `timeout` is used together with `run_in_background`, it is a kill deadline (max 2h).
-- **`description`** (optional): a short label used in `/tasks` and in notifications.
+- **`bash` with `run_in_background: true`**: returns a task id (`b…`) and output file immediately.
+  A `<task-notification>` arrives when the command exits, so no polling.
+- **Auto-background on timeout**: a foreground command still running after `timeout` (default 120s) is
+  backgrounded instead of killed. Commands starting with `sleep` are still killed. With `run_in_background`,
+  `timeout` is a kill deadline (max 2h).
+- **`description`** (optional): short label for `/tasks` and notifications.
 - **`task_output`** and **`task_stop`** (from `../shared/task-core.ts`): read or wait for a task, or kill its process tree.
 
-## What you get
+## User-facing
 
-- **Ctrl+B** moves the running foreground command (or subagent, or workflow) to the background.
-  The widget below the editor shows a hint once a task has run for 3s.
-  - pi binds Ctrl+B to "cursor left" by default, so startup prints a shortcut-conflict warning.
-  - To silence it, add `"tui.editor.cursorLeft": ["left"]` to `~/.pi/agent/keybindings.json`.
-  - To use a different key, set `PI_BACKGROUND_KEY`, e.g. `ctrl+shift+b`.
-- **A widget below the editor** lists running and recently finished background tasks.
-- **`/tasks`** lists the tasks. From there you can view a task's output or stop it.
-  - `/tasks stop <id>` stops a task directly.
-  - If you stop a task, the model is notified. If the model stopped it with `task_stop`, no notification is sent.
+- **Ctrl+B** backgrounds the running foreground command, subagent or workflow. A hint appears in the
+  widget after 3s.
+  - pi binds Ctrl+B to "cursor left" by default, so startup warns about a shortcut conflict.
+    Silence it by adding `"tui.editor.cursorLeft": ["left"]` to `~/.pi/agent/keybindings.json`.
+  - Change the key with `PI_BACKGROUND_KEY`, e.g. `ctrl+shift+b`.
+- **Widget** below the editor lists running and recently finished background tasks.
+- **`/tasks`** lists tasks and lets you view output or stop them; `/tasks stop <id>` stops one directly.
+  The model is notified when you stop a task, but not when it stops one itself with `task_stop`.
 
 ## Behavior
 
-| Situation                                                    | What happens                                                                                                                                      |
-|--------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| Background command exits (interactive)                       | `<task-notification>` (status, exit code, last 1.5KB of output, output path). Starts a turn when idle, or is steered into the current run         |
-| Background command exits (`-p`/json, e.g. inside a subagent) | Added at the next turn boundary. Before the run settles, pi waits for running background tasks, like `claude -p`                                  |
-| Time limits                                                  | Interactive: none, unless `timeout` was given. Non-interactive: 10 min for shells and 30 min for agents/workflows (`PI_BACKGROUND_TIME_LIMIT_MS`) |
-| Output > 5GB                                                 | killed                                                                                                                                            |
-| Esc during a foreground command                              | kills it (background tasks keep running)                                                                                                          |
-| pi exits                                                     | every task is killed. `/reload` keeps tasks running and notifications still arrive                                                                |
-| Called from codemode or `ctx.executeTool`                    | plain pi behavior: never auto-backgrounded, Ctrl+B doesn't detach it, and `timeout` kills it                                                      |
+| Situation                                                    | Result                                                                                                                                        |
+|--------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| Background command exits (interactive)                       | `<task-notification>` (status, exit code, last 1.5KB of output, output path). Starts a turn when idle, otherwise steered into the current run |
+| Background command exits (`-p`/json, e.g. inside a subagent) | Added at the next turn boundary. Like `claude -p`, pi waits for running background tasks before the run settles                               |
+| Time limits                                                  | Interactive: none unless `timeout` is set. Non-interactive: 10 min for shells, 30 min for agents/workflows (`PI_BACKGROUND_TIME_LIMIT_MS`)    |
+| Output > 5GB                                                 | Killed                                                                                                                                        |
+| Esc during a foreground command                              | Kills it; background tasks keep running                                                                                                       |
+| pi exits                                                     | All tasks killed. `/reload` keeps them running and notifications still arrive                                                                 |
+| Called from codemode or `ctx.executeTool`                    | Plain pi behavior: no auto-background, Ctrl+B doesn't detach, `timeout` kills                                                                 |
 
-Foreground commands that finish normally are removed from the task list, and their output file is deleted.
+Foreground commands that finish normally are dropped from the task list and their output file deleted.
 pi's own truncated-output log still applies.
 
-## Environment Variables
+## Environment variables
 
-- `PI_BASH_AUTO_BACKGROUND_MS`: foreground timeout before auto-backgrounding. Default `120000`. `0` restores pi's plain behavior: no default timeout, and `timeout` kills.
-- `PI_BACKGROUND_TIME_LIMIT_MS`: time limit for background tasks in non-interactive runs.
+- `PI_BASH_AUTO_BACKGROUND_MS`: foreground timeout before auto-backgrounding. Default `120000`; `0` restores plain pi behavior (no default timeout, `timeout` kills).
+- `PI_BACKGROUND_TIME_LIMIT_MS`: background task time limit in non-interactive runs.
 - `PI_BACKGROUND_KEY`: the shortcut. Default `ctrl+b`.
