@@ -31,20 +31,20 @@ pi install ./pip            # everything (recommended), or: pi install ./pip/bac
 
 ## Behavior
 
-| Situation | What happens |
-|---|---|
-| Background command exits (interactive) | `<task-notification>` (status, exit code, last 1.5KB of output, output path). Starts a turn when idle, or is steered into the current run |
-| Background command exits (`-p`/json, e.g. inside a subagent) | Added at the next turn boundary. Before the run settles, pi waits for running background tasks, like `claude -p` |
-| Time limits | Interactive: none, unless `timeout` was given. Non-interactive: 10 min for shells and 30 min for agents/workflows (`PI_BACKGROUND_TIME_LIMIT_MS`) |
-| Output > 5GB | killed |
-| Esc during a foreground command | kills it (background tasks keep running) |
-| pi exits | every task is killed. `/reload` keeps tasks running and notifications still arrive |
-| Called from codemode or `ctx.executeTool` | plain pi behavior: never auto-backgrounded, Ctrl+B doesn't detach it, and `timeout` kills it |
+| Situation                                                    | What happens                                                                                                                                      |
+|--------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| Background command exits (interactive)                       | `<task-notification>` (status, exit code, last 1.5KB of output, output path). Starts a turn when idle, or is steered into the current run         |
+| Background command exits (`-p`/json, e.g. inside a subagent) | Added at the next turn boundary. Before the run settles, pi waits for running background tasks, like `claude -p`                                  |
+| Time limits                                                  | Interactive: none, unless `timeout` was given. Non-interactive: 10 min for shells and 30 min for agents/workflows (`PI_BACKGROUND_TIME_LIMIT_MS`) |
+| Output > 5GB                                                 | killed                                                                                                                                            |
+| Esc during a foreground command                              | kills it (background tasks keep running)                                                                                                          |
+| pi exits                                                     | every task is killed. `/reload` keeps tasks running and notifications still arrive                                                                |
+| Called from codemode or `ctx.executeTool`                    | plain pi behavior: never auto-backgrounded, Ctrl+B doesn't detach it, and `timeout` kills it                                                      |
 
 Foreground commands that finish normally are removed from the task list, and their output file is deleted.
 pi's own truncated-output log still applies.
 
-## Env
+## Environment Variables
 
 - `PI_BASH_AUTO_BACKGROUND_MS`: foreground timeout before auto-backgrounding. Default `120000`. `0` restores pi's plain behavior: no default timeout, and `timeout` kills.
 - `PI_BACKGROUND_TIME_LIMIT_MS`: time limit for background tasks in non-interactive runs.

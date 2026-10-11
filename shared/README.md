@@ -1,16 +1,8 @@
 # pip-shared
 
-This is a library used by `background-commands/`, `subagents/` and `dynamic-workflows/`. It is not a
-pi package. Each of those extensions imports it through a relative path.
+This is a shared library for the task registry, background/foreground handling, and file handling.
 
-| File | What it does |
-|---|---|
-| `tasks.ts` | The task registry. Tasks are `bash`, `agent` or `workflow`. Each task can be foreground or background, can be finished, stopped or given a time limit, and writes to an output file. The registry is stored on `globalThis` under `Symbol.for("pip.task-registry.v1")` because pi loads every package with its own module root. Use `awaitForeground(task, toolSignal)` to wait for either `"done"` or `"background"`. |
-| `task-core.ts` | `installTaskCore(pi)`. The first call in a runtime wins; later calls are detected over `pi.events`. It sets up `<task-notification>` delivery, the settle wait for non-interactive runs, `task_output`/`task_stop`, `/tasks`, Ctrl+B, and the widget. |
-| `pi-runner.ts` | `runPi()` starts a `pi --mode json -p` child. Options cover model, thinking, tools, appended prompts, a JSON-schema result through `submit_result`, a persisted session for resuming, progress events, usage, abort and timeout. |
-| `submit-result.ts` | The child-side extension that registers `submit_result`. It is loaded with `-e` when a schema is requested. |
-| `agents.ts` | Discovers agent type definitions (`.pi/agents`, `.claude/agents`, bundled). |
-| `util.ts` | Small helpers, plus `SUBAGENT_DEPTH` and `MAX_SUBAGENT_DEPTH`. |
+Also it provides various shared tools.
 
 ## The task lifecycle
 

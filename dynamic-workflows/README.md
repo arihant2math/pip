@@ -13,7 +13,7 @@ pi install ./pip/dynamic-workflows      # or just this; it still needs ../shared
 Then ask for one: *"use a workflow to audit every route handler for missing auth checks, and have
 a second agent try to refute each finding"*.
 
-## Design (grug)
+## Design
 
 - **One tool, `workflow`, and no commands, modes, or settings.** Its description is about 2 KB and lists the whole API.
 - **The subagent is `pi -p --mode json --no-session`**, run by the shared runner (`../shared/pi-runner.ts`,
