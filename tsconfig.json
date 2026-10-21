@@ -19,6 +19,9 @@
       ],
       "@earendil-works/pi-ai": [
         "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/compat.d.ts"
+      ],
+      "@number0/iroh": [
+        "./pi-live/node_modules/@number0/iroh/index.d.ts"
       ]
     },
     "typeRoots": [
@@ -32,6 +35,7 @@
     "shared/*.ts",
     "background-commands/*.ts",
     "subagents/*.ts",
-    "dynamic-workflows/*.ts"
+    "dynamic-workflows/*.ts",
+    "pi-live/*.ts"
   ]
 }

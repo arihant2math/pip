@@ -9,6 +9,7 @@ A task can block a tool call or run in the background. When a background task fi
 | [`background-commands/`](background-commands/README.md) | `bash` gains `run_in_background`; long foreground commands are auto-backgrounded on timeout; Ctrl+B               |
 | [`subagents/`](subagents/README.md)                     | `agent` tool (types from `.pi/agents`, `.claude/agents` or bundled), `send_message` to resume, worktree isolation |
 | [`dynamic-workflows/`](dynamic-workflows/README.md)     | `workflow` tool: JS scripts that fan out to many subagents; can run in the background                             |
+| [`pi-live/`](pi-live/README.md)                         | Share a live session peer-to-peer over iroh: `/live` to share, `/watch <code>` to watch and (with approval) steer |
 
 ## Installation
 
@@ -27,7 +28,7 @@ pi install ./pip
 ## Experimentation
 
 ```shell
-pi -e ./pip/background-commands -e ./pip/subagents -e ./pip/dynamic-workflows
+pi -e ./pip/background-commands -e ./pip/subagents -e ./pip/dynamic-workflows -e ./pip/pi-live
 ```
 
 ## Development

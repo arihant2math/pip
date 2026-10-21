@@ -1,0 +1,18 @@
+{
+  "name": "pi-live",
+  "version": "0.1.0",
+  "description": "Share a live pi session peer-to-peer over iroh: friends can watch and (with permission) steer it",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "dependencies": {
+    "@number0/iroh": "^1.1.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}
