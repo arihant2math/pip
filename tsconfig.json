@@ -32,7 +32,6 @@
     "shared/*.ts",
     "background-commands/*.ts",
     "subagents/*.ts",
-    "dynamic-workflows/*.ts",
-    "pi-claude-code-use/extensions/*.ts"
+    "dynamic-workflows/*.ts"
   ]
 }
