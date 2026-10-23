@@ -2,24 +2,32 @@
 /**
  * Standalone pi-live viewer, no pi needed:
  *
- *   node --experimental-strip-types watch-cli.ts <share code> [--name you] [--json]
+ *   node --experimental-strip-types watch-cli.ts <share code> [--name you] [--json] [--gui [--theme name] [--no-open]]
  *
- * Prints the transcript and live output. Lines typed on stdin are sent as prompts once the host
+ * Prints the transcript and live output. With --gui, serves a browser view (styled like pi's
+ * /export HTML) on 127.0.0.1 and opens it instead. Lines typed on stdin are sent as prompts once the host
  * grants control:  /control  request control · /steer <text>  steer · /abort  abort · /quit
  * With --json, every host frame is printed as one JSON line instead (useful for scripting/tests).
  */
 import * as readline from "node:readline";
 import { LiveViewer, type ViewState } from "./client.ts";
+import { openBrowser, resolveGuiTheme, WatchGui } from "./gui.ts";
 import type { Item } from "./protocol.ts";
 import { renderItem, type Style } from "./transcript.ts";
 
 const argv = process.argv.slice(2);
 const json = argv.includes("--json");
-const nameIdx = argv.indexOf("--name");
-const name = nameIdx >= 0 ? argv[nameIdx + 1] : process.env.PI_LIVE_NAME || process.env.USER;
-const code = argv.find((a, i) => !a.startsWith("--") && argv[i - 1] !== "--name");
+const guiMode = argv.includes("--gui");
+const noOpen = argv.includes("--no-open");
+const valueOf = (flag: string) => {
+	const i = argv.indexOf(flag);
+	return i >= 0 ? argv[i + 1] : undefined;
+};
+const name = valueOf("--name") ?? (process.env.PI_LIVE_NAME || process.env.USER);
+const themeName = valueOf("--theme");
+const code = argv.find((a, i) => !a.startsWith("--") && argv[i - 1] !== "--name" && argv[i - 1] !== "--theme");
 if (!code) {
-	process.stderr.write("usage: pi-live-watch <share code> [--name you] [--json]\n");
+	process.stderr.write("usage: pi-live-watch <share code> [--name you] [--json] [--gui [--theme dark|light|<name>] [--no-open]]\n");
 	process.exit(2);
 }
 
@@ -125,7 +133,16 @@ function onState(s: ViewState) {
 	}
 }
 
-if (!json) {
+if (guiMode) {
+	// The browser shows the transcript; the terminal only reports connection changes and notices.
+	viewer.onChange = (s) => {
+		if (s.conn === lastConn) return;
+		lastConn = s.conn;
+		process.stderr.write(style.muted(`[${s.conn}${s.detail ? `: ${sanitize(s.detail)}` : ""}]\n`));
+		if (s.conn === "closed") setTimeout(() => process.exit(0), 500); // let the page see "closed"
+	};
+	viewer.onNotice = (level, text) => process.stderr.write(`${level === "error" ? style.error("!") : style.muted("·")} ${sanitize(text)}\n`);
+} else if (!json) {
 	viewer.onChange = onState;
 	viewer.onNotice = (level, text) => process.stderr.write(`${level === "error" ? style.error("!") : style.muted("·")} ${sanitize(text)}\n`);
 } else {
@@ -148,6 +165,7 @@ if (!json) {
 }
 
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
+let gui: WatchGui | undefined;
 rl.on("line", (line) => {
 	const text = line.trim();
 	if (!text) return;
@@ -167,7 +185,16 @@ rl.on("close", () => {
 });
 process.on("SIGINT", () => void viewer.close().then(() => process.exit(0)));
 
-viewer.start().catch((err) => {
-	process.stderr.write(`could not connect: ${err.message}\n`);
-	process.exit(1);
-});
+viewer
+	.start()
+	.then(async () => {
+		if (!guiMode) return;
+		gui = new WatchGui(viewer, await resolveGuiTheme({ name: themeName }));
+		const url = await gui.start();
+		process.stderr.write(`${style.accent("pi-live GUI:")} ${url}\n`);
+		if (!noOpen) openBrowser(url);
+	})
+	.catch((err) => {
+		process.stderr.write(`could not connect: ${err.message}\n`);
+		process.exit(1);
+	});

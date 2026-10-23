@@ -24,6 +24,8 @@ Viewer, inside pi:
 ```
 /watch pilive1:…               open the live overlay
 /watch                         reopen it after Esc (the connection stays up)
+/watch pilive1:… --gui         watch in the browser instead (see below)
+/watch gui                     open the browser view for the current watch
 /watch stop                    disconnect
 ```
 
@@ -45,6 +47,23 @@ node --experimental-strip-types pi-live/watch-cli.ts pilive1:… [--name you] [-
 
 It prints the transcript and streams output. Typed lines become prompts once control is granted; `/control`,
 `/steer <text>`, `/abort`, `/quit`.
+
+### Browser GUI
+
+```
+/watch pilive1:… --gui                                                     inside pi
+node --experimental-strip-types pi-live/watch-cli.ts pilive1:… --gui       without pi [--theme light] [--no-open]
+```
+
+This opens a page that looks like pi's `/export` HTML. It uses the export's own stylesheet, marked and
+highlight.js from the viewer's pi install, plus the viewer's theme colors. It updates live and has buttons to
+request control, send, steer (Alt+Enter) and abort. T and O toggle thinking and tool output, as in the export.
+Everything happens on the viewer's side, so **the host doesn't need to update**.
+
+The page is served on `127.0.0.1` at a random port, and the URL contains a random token. Every request needs
+the token. POSTs also need it in a custom header, which blocks cross-site requests. The server rejects
+foreign `Host` headers to stop DNS rebinding. The page's CSP blocks all remote loads. Treat the URL like
+the share code.
 
 ## Security model
 
@@ -88,7 +107,9 @@ exits.
 | `transcript.ts` | pi messages → compact items, text rendering |
 | `watch-view.ts` | TUI overlay |
 | `watch-cli.ts` | standalone viewer |
+| `gui.ts`, `gui/app.js` | browser viewer: local HTTP + SSE server, page built from pi's export template |
 | `test/e2e.ts` | end-to-end test over real iroh with a scripted model |
+| `test/gui.ts` | browser viewer test (auth, SSE, prompt/steer/abort); `--keep` leaves it running |
 
 ## Install
 
@@ -102,6 +123,6 @@ local checkout, run `npm install` in `pi-live/`.
 node --experimental-strip-types --no-warnings pi-live/test/e2e.ts
 ```
 
-This starts a host pi in RPC mode with a scripted model, then connects viewers over real iroh. It tests auth,
+`test/gui.ts` runs the same way. This starts a host pi in RPC mode with a scripted model, then connects viewers over real iroh. It tests auth,
 snapshot, streaming, tools, control approve/deny, prompt/steer/abort, multiple viewers, `/new` reset,
 revoke and stop.

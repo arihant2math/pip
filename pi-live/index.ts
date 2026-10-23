@@ -10,6 +10,8 @@
  *
  *   /watch <share code>   watch someone else's session (overlay; Esc hides it)
  *   /watch                reopen the overlay
+ *   /watch gui            open the browser GUI for the current watch
+ *   /watch <code> --gui   connect and open the browser GUI instead of the overlay
  *   /watch stop           disconnect
  *
  * `pi --live` starts sharing at startup (prints the code to stderr in non-interactive modes).
@@ -17,6 +19,7 @@
 import { spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { LiveViewer } from "./client.ts";
+import { openBrowser, resolveGuiTheme, WatchGui } from "./gui.ts";
 import { type ControlPolicy, LiveHost } from "./host.ts";
 import { errorMessage } from "./protocol.ts";
 import { messageToItem } from "./transcript.ts";
@@ -27,6 +30,7 @@ const KEY = Symbol.for("pi-live.state.v1");
 interface GlobalState {
 	host: LiveHost;
 	viewer?: LiveViewer;
+	gui?: WatchGui;
 	view?: WatchView;
 	/** Resolves the open overlay, if any. */
 	closeView?: () => void;
@@ -209,16 +213,45 @@ export default function (pi: ExtensionAPI) {
 		updateWatchStatus(ctx);
 	}
 
+	async function openGui(ctx: ExtensionContext) {
+		const viewer = st.viewer;
+		if (!viewer) return;
+		try {
+			if (!st.gui) {
+				const gui = new WatchGui(viewer, await resolveGuiTheme({ theme: ctx.ui.theme as any }));
+				await gui.start();
+				st.gui = gui;
+			}
+			openBrowser(st.gui.url);
+			ctx.ui.notify(`pi-live: GUI at ${st.gui.url}`, "info");
+		} catch (err) {
+			ctx.ui.notify(`pi-live: could not start the GUI: ${errorMessage(err)}`, "error");
+		}
+	}
+
+	function closeGui() {
+		st.gui?.close();
+		st.gui = undefined;
+	}
+
 	pi.registerCommand("watch", {
-		description: "Watch a pi-live session: /watch <share code> (or /watch to reopen, /watch stop)",
+		description: "Watch a pi-live session: /watch <share code> [--gui] (or /watch to reopen, /watch gui, /watch stop)",
 		handler: async (args, ctx) => {
 			if (ctx.mode !== "tui") {
 				ctx.ui.notify("/watch needs the interactive TUI; use pi-live/watch-cli.ts outside the TUI", "error");
 				return;
 			}
-			const arg = args.trim();
+			let arg = args.trim();
+			const wantGui = /(^|\s)--gui(\s|$)/.test(arg);
+			arg = arg.replace(/(^|\s)--gui(?=\s|$)/g, " ").trim();
+			if (arg === "gui") {
+				if (st.viewer && st.viewer.state.conn !== "closed") return openGui(ctx);
+				ctx.ui.notify("pi-live: not watching anything; /watch <share code> --gui", "warning");
+				return;
+			}
 			if (arg === "stop") {
 				st.closeView?.();
+				closeGui();
 				await st.viewer?.close();
 				st.viewer = undefined;
 				updateWatchStatus(ctx);
@@ -232,6 +265,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (st.viewer) {
 				st.closeView?.();
+				closeGui();
 				await st.viewer.close();
 				st.viewer = undefined;
 			}
@@ -266,6 +300,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			updateWatchStatus(ctx);
+			if (wantGui) return openGui(ctx);
 			await openView(ctx);
 		},
 	});

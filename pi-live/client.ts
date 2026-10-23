@@ -75,6 +75,30 @@ export class LiveViewer {
 	/** Called for host notices and connection events worth surfacing. */
 	onNotice?: (level: "info" | "warning" | "error", text: string) => void;
 
+	private readonly changeListeners = new Set<(state: ViewState) => void>();
+	private readonly noticeListeners = new Set<(level: "info" | "warning" | "error", text: string) => void>();
+
+	/** Extra observers besides `onChange` (e.g. the browser GUI). Returns an unsubscribe function. */
+	subscribe(onChange: (state: ViewState) => void, onNotice?: (level: "info" | "warning" | "error", text: string) => void): () => void {
+		this.changeListeners.add(onChange);
+		if (onNotice) this.noticeListeners.add(onNotice);
+		return () => {
+			this.changeListeners.delete(onChange);
+			if (onNotice) this.noticeListeners.delete(onNotice);
+		};
+	}
+
+	private notice(level: "info" | "warning" | "error", text: string) {
+		try {
+			this.onNotice?.(level, text);
+		} catch {}
+		for (const fn of this.noticeListeners) {
+			try {
+				fn(level, text);
+			} catch {}
+		}
+	}
+
 	private endpoint: any;
 	private conn: any;
 	private writer?: FrameWriter;
@@ -158,7 +182,7 @@ export class LiveViewer {
 				for (;;) {
 					const frame = await readFrame<HostFrame>(bi.recv);
 					if (frame.t === "bye") {
-						this.onNotice?.("warning", `host ended the share: ${frame.reason}`);
+						this.notice("warning", `host ended the share: ${frame.reason}`);
 						this.stopped = true;
 						clearInterval(this.pingTimer);
 						this.setConn("closed", frame.reason);
@@ -193,7 +217,7 @@ export class LiveViewer {
 		if (this.attempt >= RECONNECT_DELAYS.length) {
 			this.stopped = true;
 			this.setConn("closed", `connection lost: ${reason}`);
-			this.onNotice?.("error", `pi-live: gave up reconnecting (${reason})`);
+			this.notice("error", `pi-live: gave up reconnecting (${reason})`);
 			void this.endpoint?.close().catch(() => {});
 			return;
 		}
@@ -205,7 +229,7 @@ export class LiveViewer {
 				if (e instanceof FatalError) {
 					this.stopped = true;
 					this.setConn("closed", e.message);
-					this.onNotice?.("error", `pi-live: ${e.message}`);
+					this.notice("error", `pi-live: ${e.message}`);
 					void this.endpoint?.close().catch(() => {});
 				} else this.reconnect(errorMessage(e));
 			});
@@ -264,13 +288,13 @@ export class LiveViewer {
 			case "control":
 				s.control = f.granted;
 				s.controlPending = false;
-				this.onNotice?.(f.granted ? "info" : "warning", f.granted ? "control granted" : `control ${f.reason ?? "denied"}`);
+				this.notice(f.granted ? "info" : "warning", f.granted ? "control granted" : `control ${f.reason ?? "denied"}`);
 				break;
 			case "viewers":
 				s.viewers = f.count;
 				break;
 			case "notice":
-				this.onNotice?.(f.level, f.text);
+				this.notice(f.level, f.text);
 				break;
 			case "pong":
 				return; // no visible change
@@ -289,6 +313,11 @@ export class LiveViewer {
 		try {
 			this.onChange?.(this.state);
 		} catch {}
+		for (const fn of this.changeListeners) {
+			try {
+				fn(this.state);
+			} catch {}
+		}
 	}
 }
 
