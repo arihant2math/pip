@@ -48,7 +48,18 @@ node --experimental-strip-types pi-live/watch-cli.ts pilive1:… [--name you] [-
 It prints the transcript and streams output. Typed lines become prompts once control is granted; `/control`,
 `/steer <text>`, `/abort`, `/quit`.
 
-### Browser GUI
+### Your own session in the browser
+
+```
+/gui          open this session in the browser
+/gui stop     stop the local GUI server
+```
+
+`/gui` uses the same page, but it's fed directly from your session. It needs no share code, no iroh and
+no approval. Terminal activity streams in live, and the page's prompt box, Steer and Abort act on the
+session as if you typed them. It works whether or not you're also sharing with `/live`.
+
+### Browser GUI (viewers)
 
 ```
 /watch pilive1:… --gui                                                     inside pi
@@ -100,7 +111,7 @@ exits.
 
 | File | |
 |---|---|
-| `index.ts` | extension: `/live`, `/watch`, `--live`, event wiring |
+| `index.ts` | extension: `/live`, `/watch`, `/gui`, `--live`, event wiring |
 | `host.ts` | iroh endpoint, viewer handshake, broadcast, control |
 | `client.ts` | `LiveViewer`: connect, materialized view state, reconnect |
 | `protocol.ts` | frames, framing, share codes |
@@ -108,8 +119,10 @@ exits.
 | `watch-view.ts` | TUI overlay |
 | `watch-cli.ts` | standalone viewer |
 | `gui.ts`, `gui/app.js` | browser viewer: local HTTP + SSE server, page built from pi's export template |
+| `local.ts` | `/gui`: in-process view of the host's own session |
 | `test/e2e.ts` | end-to-end test over real iroh with a scripted model |
 | `test/gui.ts` | browser viewer test (auth, SSE, prompt/steer/abort); `--keep` leaves it running |
+| `test/self-gui.ts` | `/gui` test |
 
 ## Install
 

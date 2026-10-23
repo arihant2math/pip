@@ -60,6 +60,8 @@ export class LiveHost {
 	private pendingDelta = { text: "", thinking: "" };
 	private deltaTimer?: NodeJS.Timeout;
 	private running = new Map<string, { name: string; args: string }>();
+	/** In-process listeners (the host's own browser GUI). They get every frame and work without sharing. */
+	private locals = new Set<(frame: HostFrame) => void>();
 	/** Serializes host-side confirm dialogs. */
 	private dialogChain: Promise<unknown> = Promise.resolve();
 	controlPolicy: ControlPolicy = "ask";
@@ -147,6 +149,37 @@ export class LiveHost {
 	}
 
 	// -------------------------------------------------------------------------------------------
+	// Local (in-process) views
+
+	/** Subscribes an in-process view; it immediately gets a welcome snapshot. Returns an unsubscribe. */
+	addLocal(fn: (frame: HostFrame) => void): () => void {
+		this.locals.add(fn);
+		const snap = this.snapshot();
+		fn({
+			t: "welcome",
+			v: PROTOCOL_VERSION,
+			viewerId: "local",
+			session: this.sessionInfo(),
+			items: snap.items,
+			omitted: snap.omitted,
+			busy: this.isBusy(),
+			control: true,
+			streaming: this.streaming.text || this.streaming.thinking ? { ...this.streaming } : undefined,
+			running: [...this.running].map(([rid, r]) => ({ id: rid, ...r })),
+		});
+		if (this.waitingForHost) fn({ t: "needs_input", waiting: true });
+		fn({ t: "viewers", count: this.viewers.size });
+		return () => this.locals.delete(fn);
+	}
+
+	/** A prompt/steer/abort from the host's own local view. */
+	localCommand(f: ClientFrame): { error?: string; info?: string } {
+		if (f.t !== "prompt" && f.t !== "steer" && f.t !== "abort") return {};
+		const r = this.deliver(f);
+		return { error: r.error, info: r.info };
+	}
+
+	// -------------------------------------------------------------------------------------------
 	// Session events (called from index.ts handlers)
 
 	onAgentStart() {
@@ -169,7 +202,7 @@ export class LiveHost {
 	onDelta(kind: "text" | "thinking", text: string) {
 		if (!text) return;
 		this.streaming[kind] += text;
-		if (!this.viewers.size) return;
+		if (!this.viewers.size && !this.locals.size) return;
 		this.pendingDelta[kind] += text;
 		this.deltaTimer ??= setTimeout(() => this.flushDeltas(), DELTA_FLUSH_MS);
 	}
@@ -200,7 +233,7 @@ export class LiveHost {
 
 	/** Session replaced, tree navigated or compacted: resend the transcript. */
 	resync() {
-		if (!this.viewers.size || !this.ctx) return;
+		if ((!this.viewers.size && !this.locals.size) || !this.ctx) return;
 		this.flushDeltas();
 		const snap = this.snapshot();
 		this.broadcast({ t: "reset", session: this.sessionInfo(), items: snap.items, omitted: snap.omitted, busy: this.isBusy() });
@@ -348,35 +381,39 @@ export class LiveHost {
 		}
 		v.cmdTimes.push(now);
 
+		const r = this.deliver(f);
+		if (r.error) v.writer.write({ t: "notice", level: "error", text: r.error });
+		else if (r.info) v.writer.write({ t: "notice", level: "info", text: r.info });
+		if (r.aborted) this.notifyHost(`${v.name} aborted the run`, "warning");
+		else if (r.delivered) this.notifyHost(`${v.name} sent a ${r.delivered}`, "info");
+	}
+
+	/** Runs a prompt/steer/abort in this session (no permission checks; callers do those). */
+	private deliver(f: ClientFrame): { error?: string; info?: string; delivered?: string; aborted?: boolean } {
 		const pi = this.pi;
 		const ctx = this.ctx;
-		if (!pi || !ctx) {
-			v.writer.write({ t: "notice", level: "error", text: "host session is not ready" });
-			return;
-		}
+		if (!pi || !ctx) return { error: "host session is not ready" };
 		if (f.t === "abort") {
-			if (ctx.isIdle()) return;
-			this.notifyHost(`${v.name} aborted the run`, "warning");
+			if (ctx.isIdle()) return {};
 			ctx.abort();
-			return;
+			return { aborted: true };
 		}
+		if (f.t !== "prompt" && f.t !== "steer") return {};
 		const text = typeof f.text === "string" ? f.text.trim() : "";
-		if (!text) return;
-		if (text.length > MAX_PROMPT_CHARS) {
-			v.writer.write({ t: "notice", level: "error", text: `message too long (max ${MAX_PROMPT_CHARS} chars)` });
-			return;
-		}
+		if (!text) return {};
+		if (text.length > MAX_PROMPT_CHARS) return { error: `message too long (max ${MAX_PROMPT_CHARS} chars)` };
 		const idle = ctx.isIdle();
 		const deliverAs = idle ? undefined : f.t === "steer" ? "steer" : "followUp";
 		try {
 			// expandPromptTemplates stays false: remote text is never run as a /command or template.
 			pi.sendUserMessage(text, deliverAs ? { deliverAs } : undefined);
 		} catch (err) {
-			v.writer.write({ t: "notice", level: "error", text: `could not deliver: ${errorMessage(err)}` });
-			return;
+			return { error: `could not deliver: ${errorMessage(err)}` };
 		}
-		if (deliverAs) v.writer.write({ t: "notice", level: "info", text: deliverAs === "steer" ? "steering message queued" : "queued as follow-up" });
-		this.notifyHost(`${v.name} sent a ${deliverAs ?? "prompt"}`, "info");
+		return {
+			delivered: deliverAs ?? "prompt",
+			info: deliverAs ? (deliverAs === "steer" ? "steering message queued" : "queued as follow-up") : undefined,
+		};
 	}
 
 	private async requestControl(v: Viewer) {
@@ -486,6 +523,11 @@ export class LiveHost {
 
 	private broadcast(frame: HostFrame) {
 		for (const v of this.viewers.values()) v.writer.write(frame);
+		for (const fn of this.locals) {
+			try {
+				fn(frame);
+			} catch {}
+		}
 	}
 
 	private broadcastViewers() {

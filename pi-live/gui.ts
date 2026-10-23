@@ -16,7 +16,7 @@ import * as http from "node:http";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { LiveViewer, ViewState } from "./client.ts";
+import type { ViewModel, ViewState } from "./client.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -163,7 +163,7 @@ export async function resolveGuiTheme(opts: { theme?: { name?: string; colors?: 
 
 const scriptSafe = (s: string) => s.replace(/<\/(script)/gi, "<\\/$1");
 
-function buildPage(assets: ExportAssets, theme: GuiTheme, token: string): string {
+function buildPage(assets: ExportAssets, theme: GuiTheme, token: string, local: boolean): string {
 	const themeVars = Object.entries(theme.colors)
 		.filter(([k, v]) => /^[a-zA-Z0-9_-]+$/.test(k) && typeof v === "string" && !/[;{}<]/.test(v))
 		.map(([k, v]) => `--${k}: ${v};`)
@@ -174,13 +174,13 @@ function buildPage(assets: ExportAssets, theme: GuiTheme, token: string): string
 		.replace("{{CONTAINER_BG}}", theme.cardBg)
 		.replace("{{INFO_BG}}", theme.infoBg);
 	const app = fs.readFileSync(path.join(here, "gui", "app.js"), "utf8");
-	const config = JSON.stringify({ token }).replace(/</g, "\\u003c");
+	const config = JSON.stringify({ token, local }).replace(/</g, "\\u003c");
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>pi-live</title>
+  <title>${local ? "pi" : "pi-live"}</title>
   <style>
 ${css}
   </style>
@@ -225,12 +225,15 @@ export class WatchGui {
 	private unsubscribe?: () => void;
 	private heartbeat?: NodeJS.Timeout;
 	private page?: string;
-	private readonly viewer: LiveViewer;
+	private readonly viewer: ViewModel;
 	private readonly theme: GuiTheme;
+	private readonly local: boolean;
 
-	constructor(viewer: LiveViewer, theme: GuiTheme) {
+	/** `local`: the viewer is this pi session itself (`/gui`), not a remote share. */
+	constructor(viewer: ViewModel, theme: GuiTheme, opts: { local?: boolean } = {}) {
 		this.viewer = viewer;
 		this.theme = theme;
+		this.local = !!opts.local;
 	}
 
 	get url(): string {
@@ -244,7 +247,7 @@ export class WatchGui {
 	/** Starts the local server; resolves to the page URL. */
 	async start(): Promise<string> {
 		if (this.server) return this.url;
-		this.page = buildPage(await loadAssets(), this.theme, this.token);
+		this.page = buildPage(await loadAssets(), this.theme, this.token, this.local);
 		const server = http.createServer((req, res) => this.handle(req, res));
 		await new Promise<void>((resolve, reject) => {
 			server.once("error", reject);
@@ -414,6 +417,7 @@ export class WatchGui {
 
 /** Opens a URL in the default browser (best effort). */
 export function openBrowser(url: string) {
+	if (process.env.PI_LIVE_NO_OPEN) return;
 	const [cmd, args] =
 		process.platform === "darwin"
 			? ["open", [url]]

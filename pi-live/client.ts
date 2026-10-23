@@ -54,8 +54,11 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
 	]);
 }
 
-export class LiveViewer {
-	readonly share: ShareCode;
+/**
+ * Materialized view of a host's transcript, built from host frames. Shared by the remote viewer
+ * (`LiveViewer`) and the in-process local session view (`local.ts`).
+ */
+export abstract class ViewModel {
 	readonly state: ViewState = {
 		conn: "connecting",
 		items: [],
@@ -88,7 +91,7 @@ export class LiveViewer {
 		};
 	}
 
-	private notice(level: "info" | "warning" | "error", text: string) {
+	protected notice(level: "info" | "warning" | "error", text: string) {
 		try {
 			this.onNotice?.(level, text);
 		} catch {}
@@ -99,6 +102,97 @@ export class LiveViewer {
 		}
 	}
 
+	abstract send(frame: ClientFrame): boolean;
+	abstract requestControl(): boolean;
+	abstract close(): Promise<void>;
+
+	protected apply(f: HostFrame) {
+		if (process.env.PI_LIVE_DEBUG) process.stderr.write(`[frame ${Date.now() % 100000}] ${JSON.stringify(f).slice(0, 160)}\n`);
+		const s = this.state;
+		switch (f.t) {
+			case "welcome":
+			case "reset":
+				s.session = f.session;
+				s.items = f.items.slice();
+				s.omitted = f.omitted;
+				s.syncs++;
+				s.busy = f.busy;
+				s.streaming = { text: "", thinking: "" };
+				s.running = new Map();
+				if (f.t === "welcome") {
+					s.control = f.control;
+					if (f.streaming) s.streaming = { ...f.streaming };
+					for (const r of f.running ?? []) s.running.set(r.id, { name: r.name, args: r.args });
+				}
+				break;
+			case "item":
+				s.items.push(f.item);
+				if (s.items.length > MAX_ITEMS) {
+					const drop = s.items.length - MAX_ITEMS;
+					s.items.splice(0, drop);
+					s.omitted += drop;
+				}
+				if (f.item.k === "assistant") s.streaming = { text: "", thinking: "" };
+				if (f.item.k === "tool" && f.item.id) s.running.delete(f.item.id);
+				break;
+			case "delta":
+				if (f.kind === "text") s.streaming.text += f.text;
+				else s.streaming.thinking += f.text;
+				break;
+			case "tool_start":
+				s.running.set(f.id, { name: f.name, args: f.args });
+				break;
+			case "tool_end":
+				s.running.delete(f.id);
+				break;
+			case "busy":
+				s.busy = f.busy;
+				if (!f.busy) {
+					s.running.clear();
+					s.streaming = { text: "", thinking: "" };
+				}
+				break;
+			case "needs_input":
+				s.waitingForHost = f.waiting;
+				break;
+			case "control":
+				s.control = f.granted;
+				s.controlPending = false;
+				this.notice(f.granted ? "info" : "warning", f.granted ? "control granted" : `control ${f.reason ?? "denied"}`);
+				break;
+			case "viewers":
+				s.viewers = f.count;
+				break;
+			case "notice":
+				this.notice(f.level, f.text);
+				break;
+			case "pong":
+				return; // no visible change
+		}
+		this.changed();
+	}
+
+	protected setConn(conn: ConnState, detail?: string) {
+		this.state.conn = conn;
+		this.state.detail = detail;
+		this.changed();
+	}
+
+	protected changed() {
+		this.state.version++;
+		try {
+			this.onChange?.(this.state);
+		} catch {}
+		for (const fn of this.changeListeners) {
+			try {
+				fn(this.state);
+			} catch {}
+		}
+	}
+}
+
+export class LiveViewer extends ViewModel {
+	readonly share: ShareCode;
 	private endpoint: any;
 	private conn: any;
 	private writer?: FrameWriter;
@@ -110,6 +204,7 @@ export class LiveViewer {
 	private readonly displayName?: string;
 
 	constructor(shareCode: string, displayName?: string) {
+		super();
 		this.share = parseShare(shareCode);
 		this.displayName = displayName;
 	}
@@ -234,90 +329,6 @@ export class LiveViewer {
 				} else this.reconnect(errorMessage(e));
 			});
 		}, delay);
-	}
-
-	private apply(f: HostFrame) {
-		if (process.env.PI_LIVE_DEBUG) process.stderr.write(`[frame ${Date.now() % 100000}] ${JSON.stringify(f).slice(0, 160)}\n`);
-		const s = this.state;
-		switch (f.t) {
-			case "welcome":
-			case "reset":
-				s.session = f.session;
-				s.items = f.items.slice();
-				s.omitted = f.omitted;
-				s.syncs++;
-				s.busy = f.busy;
-				s.streaming = { text: "", thinking: "" };
-				s.running = new Map();
-				if (f.t === "welcome") {
-					s.control = f.control;
-					if (f.streaming) s.streaming = { ...f.streaming };
-					for (const r of f.running ?? []) s.running.set(r.id, { name: r.name, args: r.args });
-				}
-				break;
-			case "item":
-				s.items.push(f.item);
-				if (s.items.length > MAX_ITEMS) {
-					const drop = s.items.length - MAX_ITEMS;
-					s.items.splice(0, drop);
-					s.omitted += drop;
-				}
-				if (f.item.k === "assistant") s.streaming = { text: "", thinking: "" };
-				if (f.item.k === "tool" && f.item.id) s.running.delete(f.item.id);
-				break;
-			case "delta":
-				if (f.kind === "text") s.streaming.text += f.text;
-				else s.streaming.thinking += f.text;
-				break;
-			case "tool_start":
-				s.running.set(f.id, { name: f.name, args: f.args });
-				break;
-			case "tool_end":
-				s.running.delete(f.id);
-				break;
-			case "busy":
-				s.busy = f.busy;
-				if (!f.busy) {
-					s.running.clear();
-					s.streaming = { text: "", thinking: "" };
-				}
-				break;
-			case "needs_input":
-				s.waitingForHost = f.waiting;
-				break;
-			case "control":
-				s.control = f.granted;
-				s.controlPending = false;
-				this.notice(f.granted ? "info" : "warning", f.granted ? "control granted" : `control ${f.reason ?? "denied"}`);
-				break;
-			case "viewers":
-				s.viewers = f.count;
-				break;
-			case "notice":
-				this.notice(f.level, f.text);
-				break;
-			case "pong":
-				return; // no visible change
-		}
-		this.changed();
-	}
-
-	private setConn(conn: ConnState, detail?: string) {
-		this.state.conn = conn;
-		this.state.detail = detail;
-		this.changed();
-	}
-
-	private changed() {
-		this.state.version++;
-		try {
-			this.onChange?.(this.state);
-		} catch {}
-		for (const fn of this.changeListeners) {
-			try {
-				fn(this.state);
-			} catch {}
-		}
 	}
 }
 

@@ -5,6 +5,8 @@
 
   const config = JSON.parse(document.getElementById('pi-live-config').textContent);
   const token = config.token;
+  const local = !!config.local;
+  const label = local ? 'pi' : 'pi-live';
 
   // ============================================================
   // HELPERS (same as the export template)
@@ -355,7 +357,7 @@
   function renderHeader() {
     const s = state;
     const title = s.session?.name || s.session?.cwd || 'remote session';
-    const activity = s.waitingForHost ? 'waiting for host (answering a prompt in their terminal)' : s.busy ? 'working' : 'idle';
+    const activity = s.waitingForHost ? (local ? 'waiting for you in the terminal' : 'waiting for host (answering a prompt in their terminal)') : s.busy ? 'working' : 'idle';
     const control = s.control ? 'yes' : s.controlPending ? 'requested, waiting for host…' : 'no (view only)';
     const controlBtn = s.control
       ? ''
@@ -363,7 +365,7 @@
     const abortBtn = s.control && s.busy ? '<button type="button" class="header-toggle-btn" data-action="abort" title="Abort the running turn">Abort</button>' : '';
     let html = `
       <div class="header">
-        <h1>pi-live: ${escapeHtml(title)}</h1>
+        <h1>${label}: ${escapeHtml(title)}</h1>
         <div class="help-bar">
           <span class="help-hint">T toggle thinking · O toggle tools · Enter send · Shift+Enter newline</span>
           <div class="help-actions">
@@ -375,10 +377,10 @@
         <div class="header-info">
           <div class="info-item"><span class="info-label">Connection:</span><span class="info-value">${escapeHtml(statusText(s))}</span></div>
           <div class="info-item"><span class="info-label">Activity:</span><span class="info-value">${escapeHtml(activity)}</span></div>
-          <div class="info-item"><span class="info-label">Control:</span><span class="info-value">${escapeHtml(control)}</span></div>
+          ${local ? '' : `<div class="info-item"><span class="info-label">Control:</span><span class="info-value">${escapeHtml(control)}</span></div>`}
           ${s.session?.model ? `<div class="info-item"><span class="info-label">Model:</span><span class="info-value">${escapeHtml(s.session.model)}</span></div>` : ''}
           ${s.session?.cwd ? `<div class="info-item"><span class="info-label">Directory:</span><span class="info-value">${escapeHtml(shortenPath(s.session.cwd))}</span></div>` : ''}
-          <div class="info-item"><span class="info-label">Watching:</span><span class="info-value">${s.viewers || 1}</span></div>
+          ${local ? (s.viewers ? `<div class="info-item"><span class="info-label">Live viewers:</span><span class="info-value">${s.viewers}</span></div>` : '') : `<div class="info-item"><span class="info-label">Watching:</span><span class="info-value">${s.viewers || 1}</span></div>`}
           ${lastNotice ? `<div class="info-item"><span class="info-label">Notice:</span><span class="info-value${lastNotice.level === 'error' ? ' error-text' : ''}">${escapeHtml(lastNotice.text)}</span></div>` : ''}
         </div>
       </div>`;
@@ -440,7 +442,7 @@
     renderTail();
     renderHeader();
     renderComposer();
-    document.title = `pi-live: ${msg.session?.name || msg.session?.cwd || 'remote'}${msg.busy ? ' (working)' : ''}`;
+    document.title = `${label}: ${msg.session?.name || msg.session?.cwd || 'remote'}${msg.busy ? ' (working)' : ''}`;
     if (follow) scrollToBottom();
     firstState = false;
   }
@@ -548,7 +550,7 @@
   });
   events.addEventListener('error', () => {
     if (events.readyState === EventSource.CLOSED || state) {
-      showNotice('error', 'lost connection to the local viewer (is /watch or watch-cli still running?)');
+      showNotice('error', local ? 'lost connection to pi (did it exit, or was /gui stop run?)' : 'lost connection to the local viewer (is /watch or watch-cli still running?)');
     }
   });
   events.addEventListener('open', () => {

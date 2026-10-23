@@ -14,11 +14,15 @@
  *   /watch <code> --gui   connect and open the browser GUI instead of the overlay
  *   /watch stop           disconnect
  *
+ *   /gui                  open this session in the browser GUI (no sharing involved)
+ *   /gui stop             stop the GUI server
+ *
  * `pi --live` starts sharing at startup (prints the code to stderr in non-interactive modes).
  */
 import { spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { LiveViewer } from "./client.ts";
+import { LocalView } from "./local.ts";
 import { openBrowser, resolveGuiTheme, WatchGui } from "./gui.ts";
 import { type ControlPolicy, LiveHost } from "./host.ts";
 import { errorMessage } from "./protocol.ts";
@@ -31,6 +35,8 @@ interface GlobalState {
 	host: LiveHost;
 	viewer?: LiveViewer;
 	gui?: WatchGui;
+	/** `/gui`: browser view of this session. */
+	selfGui?: { gui: WatchGui; view: LocalView };
 	view?: WatchView;
 	/** Resolves the open overlay, if any. */
 	closeView?: () => void;
@@ -100,6 +106,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (event) => {
 		if (event.reason === "quit") {
 			st.closeView?.();
+			closeSelfGui();
+			closeGui();
 			await Promise.allSettled([host.stop("host exited pi"), st.viewer?.close()]);
 			st.viewer = undefined;
 		} else {
@@ -181,6 +189,46 @@ export default function (pi: ExtensionAPI) {
 				default:
 					return say("usage: /live [stop|status|kick <id>|revoke [id]|control ask|allow|deny]", "warning");
 			}
+		},
+	});
+
+	// ---- /gui -----------------------------------------------------------------------------------
+
+	function closeSelfGui() {
+		const g = st.selfGui;
+		st.selfGui = undefined;
+		g?.gui.close();
+		void g?.view.close();
+	}
+
+	pi.registerCommand("gui", {
+		description: "Open this session in the browser (live, with a prompt box). /gui stop to close",
+		getArgumentCompletions: (prefix) => (["stop"].filter((s) => s.startsWith(prefix)).map((s) => ({ value: s, label: s }))),
+		handler: async (args, ctx) => {
+			host.attach(pi, ctx);
+			const say = (m: string, level: "info" | "warning" | "error" = "info"): void => {
+				if (ctx.hasUI) ctx.ui.notify(m, level);
+				else process.stderr.write(`${m}\n`);
+			};
+			if (args.trim() === "stop") {
+				if (!st.selfGui) return say("pi-live: GUI is not running");
+				closeSelfGui();
+				return say("pi-live: GUI stopped");
+			}
+			if (!st.selfGui) {
+				const view = new LocalView(host);
+				try {
+					const theme = await resolveGuiTheme(ctx.hasUI ? { theme: ctx.ui.theme as any } : {});
+					const gui = new WatchGui(view, theme, { local: true });
+					await gui.start();
+					st.selfGui = { gui, view };
+				} catch (err) {
+					await view.close();
+					return say(`pi-live: could not start the GUI: ${errorMessage(err)}`, "error");
+				}
+			}
+			openBrowser(st.selfGui.gui.url);
+			say(`pi-live: GUI at ${st.selfGui.gui.url}`);
 		},
 	});
 
