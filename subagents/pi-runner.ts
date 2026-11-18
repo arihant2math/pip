@@ -1,25 +1,16 @@
 /**
- * Run one `pi --mode json -p` subprocess: the subagent runtime shared by the `agent` tool
- * (subagents/) and workflow `agent()` calls (dynamic-workflows/).
+ * Run one `pi --mode json -p` subprocess: the subagent runtime behind `agent` and `send_message`.
  *
- * - Plain mode resolves with the final assistant text.
- * - With `schema`, the child loads submit-result.ts and the result is the validated object passed to
- *   `submit_result` (or JSON parsed out of a final text reply and validated against the same schema).
+ * - Resolves with the final assistant text.
  * - With `session`, the child persists its transcript (`--session-dir/--session-id`) so it can be
  *   resumed later by running again with the same session and a new prompt.
  * - A run fails only if its *last* assistant message errored (pi auto-retries transient provider
- *   errors), it timed out, it was aborted, or the process exited non-zero.
+ *   errors), it was aborted, or the process exited non-zero.
  */
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import { validateToolArguments } from "@earendil-works/pi-ai";
-import { toolParameters } from "./submit-result.ts";
 import { SUBAGENT_DEPTH } from "./util.ts";
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SUBMIT_EXT = path.join(HERE, "submit-result.ts");
 
 export type Usage = {
 	input: number;
@@ -50,8 +41,6 @@ export function addUsage(into: Usage, u: any) {
 
 export type RunPiEvent =
 	| { type: "tool_start"; toolName: string; args: any }
-	| { type: "tool_end"; toolName: string; isError: boolean; text?: string }
-	| { type: "text"; text: string }
 	| { type: "usage"; usage: any };
 
 export interface RunPiOptions {
@@ -64,18 +53,13 @@ export interface RunPiOptions {
 	/** Passed to --exclude-tools. */
 	excludeTools?: string[];
 	appendSystemPrompt?: string[];
-	/** JSON Schema for a structured result. */
-	schema?: unknown;
 	/** Persist the child session so it can be resumed; omitted = --no-session. */
 	session?: { dir: string; id: string };
-	env?: Record<string, string | undefined>;
 	signal?: AbortSignal;
-	timeoutMs?: number;
 	onEvent?: (e: RunPiEvent) => void;
 }
 
 export interface RunPiResult {
-	value: unknown;
 	text: string;
 	usage: Usage;
 	toolCalls: number;
@@ -86,18 +70,6 @@ export function piCommand(): [string, string[]] {
 	if (script && !script.startsWith("/$bunfs/") && fs.existsSync(script)) return [process.execPath, [script]];
 	if (!/^(node|bun)(\.exe)?$/i.test(path.basename(process.execPath))) return [process.execPath, []];
 	return ["pi", []];
-}
-
-/** Validate (and coerce) a candidate structured result against the submit_result parameters. */
-function validateResult(parameters: any, args: unknown): { ok: true; value: any } | { ok: false; error: string } {
-	try {
-		return {
-			ok: true,
-			value: validateToolArguments({ name: "submit_result", description: "", parameters } as any, { type: "toolCall", id: "fallback", name: "submit_result", arguments: args } as any),
-		};
-	} catch (e: any) {
-		return { ok: false, error: String(e?.message ?? e) };
-	}
 }
 
 export function runPi(opts: RunPiOptions): Promise<RunPiResult> {
@@ -114,17 +86,8 @@ export function runPi(opts: RunPiOptions): Promise<RunPiResult> {
 		...process.env,
 		PI_SUBAGENT: "1",
 		PI_SUBAGENT_DEPTH: String(SUBAGENT_DEPTH + 1),
-		...opts.env,
 	};
-	const structured = opts.schema !== undefined;
-	const { parameters, wrapped } = toolParameters(opts.schema);
-	let tools = opts.tools;
-	if (structured) {
-		args.push("-e", SUBMIT_EXT);
-		env.PI_RESULT_SCHEMA = JSON.stringify(opts.schema);
-		if (tools) tools = [...tools, "submit_result"];
-	}
-	if (tools) args.push(...(tools.length ? ["--tools", tools.join(",")] : ["--no-tools"]));
+	if (opts.tools) args.push(...(opts.tools.length ? ["--tools", opts.tools.join(",")] : ["--no-tools"]));
 	if (opts.excludeTools?.length) args.push("--exclude-tools", opts.excludeTools.join(","));
 	args.push("--", opts.prompt);
 
@@ -138,11 +101,8 @@ export function runPi(opts: RunPiOptions): Promise<RunPiResult> {
 		let stderr = "";
 		let lastText = "";
 		let toolCalls = 0;
-		let submitted: { value: unknown } | undefined;
-		let submitError: string | undefined;
 		// Error state of the LATEST assistant message only: a later success clears an earlier failed attempt.
 		let error: string | undefined;
-		let timedOut: string | undefined;
 
 		const onLine = (line: string) => {
 			if (!line.trim()) return;
@@ -164,32 +124,12 @@ export function runPi(opts: RunPiOptions): Promise<RunPiResult> {
 					.map((c: any) => c.text)
 					.join("\n")
 					.trim();
-				if (text) {
-					lastText = text;
-					opts.onEvent?.({ type: "text", text });
-				}
+				if (text) lastText = text;
 			} else if (ev.type === "auto_retry_end" && ev.success === false) {
 				error = ev.finalError || error || "provider error (retries exhausted)";
 			} else if (ev.type === "tool_execution_start" && !String(ev.toolCallId ?? "").includes("/")) {
 				toolCalls++;
 				opts.onEvent?.({ type: "tool_start", toolName: ev.toolName, args: ev.args });
-			} else if (ev.type === "tool_execution_end") {
-				if (!String(ev.toolCallId ?? "").includes("/")) {
-					const text = ev.result?.content?.find((c: any) => c.type === "text")?.text;
-					opts.onEvent?.({ type: "tool_end", toolName: ev.toolName, isError: !!ev.isError, text });
-				}
-				if (ev.toolName === "submit_result" && structured) {
-					// Only a submission that passed pi's validation and ran counts. First one wins.
-					if (ev.isError) {
-						submitError = ev.result?.content?.find((c: any) => c.type === "text")?.text?.slice(0, 500) ?? "submit_result failed";
-						return;
-					}
-					const r = ev.result?.details?.result;
-					if (submitted || r === undefined) return;
-					submitted = { value: wrapped ? r : r?.value };
-					// `terminate` doesn't stop the turn when submit_result was batched with other calls.
-					kill();
-				}
 			}
 		};
 
@@ -209,18 +149,8 @@ export function runPi(opts: RunPiOptions): Promise<RunPiResult> {
 			proc.kill("SIGTERM");
 			setTimeout(() => proc.exitCode === null && proc.kill("SIGKILL"), 5000).unref();
 		};
-		const timer = opts.timeoutMs
-			? setTimeout(() => {
-					timedOut = `timed out after ${Math.round(opts.timeoutMs! / 1000)}s`;
-					kill();
-				}, opts.timeoutMs)
-			: undefined;
 		signal?.addEventListener("abort", kill, { once: true });
-
-		const cleanup = () => {
-			if (timer) clearTimeout(timer);
-			signal?.removeEventListener("abort", kill);
-		};
+		const cleanup = () => signal?.removeEventListener("abort", kill);
 		proc.on("error", (e) => {
 			cleanup();
 			reject(e);
@@ -228,30 +158,10 @@ export function runPi(opts: RunPiOptions): Promise<RunPiResult> {
 		proc.on("close", (code) => {
 			cleanup();
 			if (buf) onLine(buf);
-			const done = (value: unknown) => resolve({ value, text: lastText, usage, toolCalls });
 			if (signal?.aborted) return reject(new Error(String(signal.reason?.message ?? "aborted")));
-			if (structured && submitted) return done(submitted.value);
-			const failure = timedOut ?? error ?? (code !== 0 ? `exit ${code}: ${stderr.trim().split("\n").pop()?.slice(-300)}` : undefined);
+			const failure = error ?? (code !== 0 ? `exit ${code}: ${stderr.trim().split("\n").pop()?.slice(-300)}` : undefined);
 			if (failure) return reject(Object.assign(new Error(failure), { partialText: lastText }));
-			if (!structured) return done(lastText);
-
-			// The agent finished cleanly but answered in text: pull JSON out and hold it to the schema.
-			const fence = lastText.match(/```(?:json)?\s*([\s\S]*?)```/);
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(fence ? fence[1] : lastText);
-			} catch {
-				return reject(new Error(submitError ? `invalid submit_result: ${submitError}` : "agent did not call submit_result"));
-			}
-			const candidates: unknown[] = wrapped ? [parsed] : [{ value: parsed }];
-			if (!wrapped && parsed && typeof parsed === "object" && "value" in parsed) candidates.push(parsed);
-			let lastErr = "";
-			for (const c of candidates) {
-				const v = validateResult(parameters, c);
-				if (v.ok) return done(wrapped ? v.value : v.value.value);
-				lastErr = v.error;
-			}
-			reject(new Error(`text result does not match schema: ${lastErr.split("\n\nReceived")[0].slice(0, 500)}`));
+			resolve({ text: lastText, usage, toolCalls });
 		});
 	});
 }
@@ -260,6 +170,6 @@ export function runPi(opts: RunPiOptions): Promise<RunPiResult> {
 export function describeToolCall(toolName: string, args: any): string {
 	const a = args ?? {};
 	const s =
-		a.command ?? a.path ?? a.pattern ?? a.query ?? a.url ?? a.prompt ?? a.description ?? a.task_id ?? (Object.keys(a).length ? JSON.stringify(a) : "");
+		a.command ?? a.path ?? a.pattern ?? a.query ?? a.url ?? a.prompt ?? a.description ?? (Object.keys(a).length ? JSON.stringify(a) : "");
 	return `${toolName} ${String(s).replace(/\s+/g, " ").slice(0, 120)}`.trim();
 }

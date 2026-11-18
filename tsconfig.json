@@ -6,36 +6,25 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "erasableSyntaxOnly": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "@earendil-works/pi-coding-agent": [
-        "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"
-      ],
-      "@earendil-works/pi-tui": [
-        "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.d.ts"
-      ],
-      "typebox": [
-        "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox/build/index.d.mts"
-      ],
-      "@earendil-works/pi-ai": [
-        "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/compat.d.ts"
-      ],
       "@number0/iroh": [
         "./pi-live/node_modules/@number0/iroh/index.d.ts"
       ]
     },
-    "typeRoots": [
-      "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@types"
-    ],
     "types": [
       "node"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM"
     ]
   },
   "include": [
-    "shared/*.ts",
-    "background-commands/*.ts",
+    "codemode/*.ts",
+    "codemode/tests/*.ts",
     "subagents/*.ts",
-    "dynamic-workflows/*.ts",
     "pi-live/*.ts"
   ]
 }

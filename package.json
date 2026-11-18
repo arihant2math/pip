@@ -2,7 +2,7 @@
   "name": "pip",
   "version": "0.1.0",
   "private": true,
-  "description": "Claude Code-style features for pi: background commands, subagents, dynamic workflows (sharing one task system)",
+  "description": "Claude Code-style features for pi: a persistent codemode kernel with background tasks, subagents, and live session sharing",
   "type": "module",
   "keywords": [
     "pi-package"
@@ -10,9 +10,8 @@
   "license": "MIT",
   "pi": {
     "extensions": [
-      "./background-commands/index.ts",
+      "./codemode/index.ts",
       "./subagents/index.ts",
-      "./dynamic-workflows/index.ts",
       "./pi-live/index.ts"
     ]
   },
@@ -23,6 +22,22 @@
     "typebox": "*"
   },
   "dependencies": {
+    "@earendil-works/pi-codemode": "1.5.2",
     "@number0/iroh": "^1.1.0"
+  },
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "node --test codemode/tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^1.5.2",
+    "@earendil-works/pi-coding-agent": "^1.5.2",
+    "@earendil-works/pi-tui": "^1.5.2",
+    "@types/node": "^26.6.6",
+    "typebox": "^1.4.3",
+    "typescript": "^7.0.2"
   }
 }

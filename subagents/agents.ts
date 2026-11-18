@@ -8,13 +8,12 @@
  *   disallowedTools: write, edit     (optional denylist)
  *   model: anthropic/claude-sonnet-5 (optional; "inherit" or omitted = the session's model)
  *   thinking: low                    (optional)
- *   background: true                 (optional; always run in the background)
  *   isolation: worktree              (optional; run in a temporary git worktree)
  *   ---
  *   System prompt (appended to pi's own system prompt, so AGENTS.md etc. still load).
  *
  * Lookup, lowest to highest precedence:
- *   bundled (subagents/agents/) < ~/.claude/agents < ~/.pi/agent/agents
+ *   bundled (agents/) < ~/.claude/agents < ~/.pi/agent/agents
  *   < project .claude/agents < project .pi/agents (walking up from cwd; nearest wins; trusted projects only)
  * Claude Code tool names in `tools` (Read, Grep, Glob, Bash, ...) are mapped to pi's.
  */
@@ -25,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-export const BUNDLED_AGENTS_DIR = path.join(HERE, "..", "subagents", "agents");
+export const BUNDLED_AGENTS_DIR = path.join(HERE, "agents");
 
 export type AgentSource = "bundled" | "user" | "project";
 
@@ -37,7 +36,6 @@ export interface AgentDefinition {
 	disallowedTools?: string[];
 	model?: string;
 	thinking?: string;
-	background?: boolean;
 	isolation?: "worktree";
 	source: AgentSource;
 	filePath: string;
@@ -58,10 +56,10 @@ const CLAUDE_TOOLS: Record<string, string | null> = {
 	task: "agent",
 	agent: "agent",
 	todowrite: null,
-	taskoutput: "task_output",
-	taskstop: "task_stop",
-	killshell: "task_stop",
-	bashoutput: "task_output",
+	taskoutput: null,
+	taskstop: null,
+	killshell: null,
+	bashoutput: null,
 };
 
 function toolList(value: unknown): string[] | undefined {
@@ -111,7 +109,6 @@ function load(dir: string, source: AgentSource): AgentDefinition[] {
 				disallowedTools: toolList(fm.disallowedTools ?? fm.disallowed_tools),
 				model,
 				thinking: typeof fm.thinking === "string" ? fm.thinking : typeof fm.effort === "string" ? fm.effort : undefined,
-				background: fm.background === true,
 				isolation: fm.isolation === "worktree" ? "worktree" : undefined,
 				source,
 				filePath,
