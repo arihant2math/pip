@@ -124,9 +124,26 @@ export function installTaskCore(pi: ExtensionAPI) {
 		for (const t of takePending()) pi.sendMessage(notificationMessage(t), { triggerTurn: true, deliverAs: "steer" });
 	};
 
+	// ---------- GUI (pi-gui: native task tray over pi.events, see publishTasks) ----------
+	const gui = () => Boolean((globalThis as { __PI_GUI__?: unknown }).__PI_GUI__);
+	let lastTasksJson = "";
+	const publishTasks = () => {
+		const now = Date.now();
+		const tasks = registry
+			.list()
+			.filter((t) => t.running || now - (t.endedAt ?? 0) < 30_000)
+			.map((t) => ({ ...t.snapshot(), foreground: t.foreground, canBackground: t.canBackground }));
+		const payload = { tasks, backgroundKey: bgKey() };
+		const json = JSON.stringify(payload);
+		if (json === lastTasksJson) return;
+		lastTasksJson = json;
+		pi.events.emit("gui:pip:tasks", payload);
+	};
+
 	// ---------- widget ----------
 	const renderWidget = () => {
 		widgetDirty = false;
+		if (gui()) publishTasks();
 		if (!ctx || ctx.mode !== "tui") return;
 		const now = Date.now();
 		const tasks = registry.list().filter((t) => t.backgrounded && (t.running || now - (t.endedAt ?? 0) < 30_000));
@@ -138,7 +155,7 @@ export function installTaskCore(pi: ExtensionAPI) {
 		});
 		if (fg.length) lines.push(theme.fg("dim", `${bgKey()} to move ${fg.length === 1 ? "the running task" : `${fg.length} running tasks`} to the background`));
 		ctx.ui.setWidget("pip-tasks", lines.length ? lines : undefined, { placement: "belowEditor" });
-		const needTimer = registry.list().some((t) => t.running) || tasks.length > 0;
+		const needTimer = registry.list().some((t) => t.running) || tasks.length > 0 || (gui() && lastTasksJson.includes('"id"'));
 		if (needTimer && !widgetTimer) {
 			widgetTimer = setInterval(renderWidget, 1000);
 			widgetTimer.unref?.();
