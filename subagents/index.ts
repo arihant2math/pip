@@ -144,7 +144,8 @@ export default function (pi: ExtensionAPI) {
 					} else if (e.type === "usage") {
 						details.cost += e.usage?.cost?.total ?? 0;
 					}
-					update();
+					// A tool start right after a usage event would otherwise be throttled away.
+					update(e.type === "tool_start");
 				},
 			});
 			details.usage = r.usage;

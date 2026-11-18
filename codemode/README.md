@@ -8,4 +8,8 @@ On top of that, scripts are TypeScript ES modules in one long-lived child proces
 
 This is pip's only background mechanism: long commands, subagents, and fan-out all run as `background()` tasks, e.g. `background("review", () => tools.agent({ description, prompt }))`.
 
+The status line shows the running tasks and what the most recently active one is doing (its tool call, then that tool's progress updates). `/bg` lists tasks with their age and activity and cancels the one you pick; `/bg cancel <name>` cancels directly, and the agent is told the user cancelled it.
+
+In print and json runs (`pi -p`, every subagent) the run stays open while background tasks are running, and each report continues it, so a result is never lost to the process exiting. `PI_BACKGROUND_TIME_LIMIT_MS` caps the wait (default 30 minutes).
+
 `pnpm test` runs the kernel tests.

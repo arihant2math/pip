@@ -113,6 +113,15 @@ test("cancel aborts the task's signal and in-flight tool calls", async () => {
   assert.equal((await report("long")).status, "cancelled");
 });
 
+test("the host lists and cancels tasks", async () => {
+  await run(`background("held", () => tools.slow({ ms: 10000 }))`);
+  assert.ok(kernel.tasks.some((task) => task.name === "held"));
+  assert.equal(kernel.taskOf({ kind: "task", name: "held" }), "held");
+  assert.equal(kernel.cancel("held"), true);
+  assert.equal((await report("held")).status, "cancelled");
+  assert.equal(kernel.cancel("held"), false);
+});
+
 test("aborting a cell keeps the kernel", async () => {
   const controller = new AbortController();
   const pending = run(`export const before = 1; await tools.slow({ ms: 10000 })`, 20_000, controller.signal);

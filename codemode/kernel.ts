@@ -46,7 +46,7 @@ export interface KernelHooks {
   rpc(method: RpcMethod, args: unknown, owner: Owner, signal: AbortSignal): Promise<unknown>;
   onTaskDone(report: TaskReport): void;
   onStoreWrite?(key: string, value: unknown): void;
-  onTasksChanged?(running: string[]): void;
+  onTasksChanged?(): void;
 }
 
 export interface RunOptions {
@@ -115,8 +115,22 @@ export class Kernel {
     return this.#child !== undefined;
   }
 
-  get runningTasks(): string[] {
-    return [...this.#tasks.keys()];
+  /** The background tasks still running, oldest first. */
+  get tasks(): { name: string; startedAt: number }[] {
+    return [...this.#tasks].map(([name, { startedAt }]) => ({ name, startedAt }));
+  }
+
+  /** The running background task `owner` belongs to, if any. */
+  taskOf(owner: Owner): string | undefined {
+    const name = owner.kind === "task" ? owner.name : owner.kind === "cell" ? this.#cellTasks.get(owner.cell) : undefined;
+    return name !== undefined && this.#tasks.has(name) ? name : undefined;
+  }
+
+  /** Abort a running task's signal, as `cancel(name)` does in a script. */
+  cancel(name: string): boolean {
+    if (!this.#tasks.has(name)) return false;
+    this.#send({ t: "cancel", name });
+    return true;
   }
 
   /** Runs `code` as the next cell. Cells run one at a time, in call order. */
@@ -241,7 +255,7 @@ export class Kernel {
       case "taskStart":
         this.#tasks.set(message.name, { buffer: new OutputBuffer(), startedAt: Date.now(), ...(message.cell === undefined ? {} : { cell: message.cell }) });
         if (message.cell !== undefined) this.#cellTasks.set(message.cell, message.name);
-        this.#hooks.onTasksChanged?.(this.runningTasks);
+        this.#hooks.onTasksChanged?.();
         break;
       case "taskDone": {
         const task = this.#tasks.get(message.name);
@@ -250,7 +264,7 @@ export class Kernel {
           this.#abortRpcs((owner) => (owner.kind === "task" && owner.name === message.name) || (owner.kind === "cell" && owner.cell === task?.cell));
         }
         if (task?.cell !== undefined) this.#cellTasks.delete(task.cell);
-        this.#hooks.onTasksChanged?.(this.runningTasks);
+        this.#hooks.onTasksChanged?.();
         this.#hooks.onTaskDone({
           name: message.name,
           status: message.status,
@@ -292,6 +306,6 @@ export class Kernel {
     }
     this.#tasks.clear();
     this.#cellTasks.clear();
-    this.#hooks.onTasksChanged?.([]);
+    this.#hooks.onTasksChanged?.();
   }
 }

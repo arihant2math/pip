@@ -17,6 +17,7 @@ export interface CatalogEntry {
 export type HostMessage =
   | { t: "run"; cell: number; file: string; timeoutMs: number; catalog: CatalogEntry[]; store: Record<string, unknown> }
   | { t: "abort"; cell: number }
+  | { t: "cancel"; name: string }
   | { t: "rpcResult"; id: number; ok: true; value: unknown }
   | { t: "rpcResult"; id: number; ok: false; error: string };
 

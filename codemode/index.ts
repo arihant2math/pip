@@ -19,6 +19,11 @@ const STATUS_KEY = "codemode";
 const DEFAULT_TIMEOUT_MS = 30_000;
 /** Tasks that finish this close together are reported in one message. */
 const REPORT_BATCH_MS = 500;
+/** How long a print or json run stays open for its background tasks once the agent has nothing left to do. */
+const SETTLE_WAIT_MS = Number(process.env.PI_BACKGROUND_TIME_LIMIT_MS) || 30 * 60_000;
+/** Status line updates closer together than this are merged. */
+const STATUS_THROTTLE_MS = 100;
+const ACTIVITY_PREVIEW_CHARS = 80;
 const TASK_OUTPUT_TOKENS = 4_000;
 const ARGS_PREVIEW_CHARS = 200;
 const ERROR_PREVIEW_CHARS = 500;
@@ -32,7 +37,7 @@ const EXTRA_GLOBALS = `- \`export\`ed names become globals for later scripts, an
 - \`background(name, (signal) => work)\` runs work as a task and messages you when it settles; \`tasks()\` lists tasks, \`cancel(name)\` aborts one.`;
 
 const BACKGROUND_GUIDELINE =
-  "For long work you don't need to wait on (subagents, builds, servers), call it in codemode as background(name, () => tools.agent({...})) and keep working; you'll get a message when it finishes.";
+  "For long work you don't need to wait on (builds, servers), make the tool call in codemode as background(name, () => tools.bash({...})), then keep working or end your turn. A message arrives when it finishes, so don't sleep or poll for it.";
 
 /** Swap the built-in intro for ours and add our globals after its own. */
 function patchDescription(description: string): string {
@@ -110,6 +115,11 @@ function readStore(ctx: ExtensionContext): Record<string, unknown> {
   return Object.fromEntries(store);
 }
 
+function age(startedAt: number): string {
+  const seconds = Math.round((Date.now() - startedAt) / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
+}
+
 function callSummary(calls: NestedCall[]): string {
   if (calls.length === 0) return "No tool calls were made.";
   return `Tool calls made before the failure (they are not undone): ${calls.map((call) => `${call.name} (${call.status})`).join(", ")}`;
@@ -133,6 +143,12 @@ export default function radishCodemode(pi: ExtensionAPI) {
   let uiContext: ExtensionContext | undefined;
   let pendingReports: TaskReport[] = [];
   let reportTimer: NodeJS.Timeout | undefined;
+  /** Set while a run is held open for its background tasks; see `agent_before_settle`. */
+  let wake: (() => void) | undefined;
+  let statusTimer: NodeJS.Timeout | undefined;
+  /** What each background task's tool call last reported, most recent last. */
+  const activity = new Map<string, string>();
+  const cancelledByUser = new Set<string>();
   let shuttingDown = false;
   let storeWrites: { set: Record<string, unknown>; delete: Set<string> } = { set: {}, delete: new Set() };
   /** Nested call rows of the scripts still running in the foreground, by cell. */
@@ -222,7 +238,14 @@ export default function radishCodemode(pi: ExtensionAPI) {
     const tool = findTool(tools.tools, name);
     if (!tool) throw new Error(`Unknown tool ${JSON.stringify(name)}. Find tools with searchTools() or ALL_TOOLS.`);
     const done = track(owner, tool.name, previewArgs(toolArgs));
-    const outcome = await ctx.executeTool(tool.name, toolArgs ?? {}, { signal });
+    note(owner, `${tool.name} ${previewArgs(toolArgs)}`);
+    const outcome = await ctx.executeTool(tool.name, toolArgs ?? {}, {
+      signal,
+      onUpdate(partial) {
+        const last = textOf(partial).trimEnd().split("\n").at(-1);
+        if (last) note(owner, `${tool.name}: ${last}`);
+      },
+    });
     const { result } = outcome;
     done?.(
       outcome.isError
@@ -238,20 +261,42 @@ export default function radishCodemode(pi: ExtensionAPI) {
     return text;
   };
 
-  const flushReports = () => {
+  const takeReports = () => {
+    clearTimeout(reportTimer);
     reportTimer = undefined;
     const reports = pendingReports;
     pendingReports = [];
-    if (reports.length === 0) return;
-    pi.sendMessage(
-      {
-        customType: MESSAGE_TYPE,
-        content: reports.flatMap(formatReport),
-        display: true,
-        details: { tasks: reports.map(({ name, status, durationMs }) => ({ name, status, durationMs })) },
-      },
-      { triggerTurn: true, deliverAs: "steer" },
-    );
+    if (reports.length === 0) return undefined;
+    return {
+      customType: MESSAGE_TYPE,
+      content: reports.flatMap(formatReport),
+      display: true,
+      details: { tasks: reports.map(({ name, status, durationMs }) => ({ name, status, durationMs })) },
+    };
+  };
+
+  const flushReports = () => {
+    const message = takeReports();
+    if (message) pi.sendMessage(message, { triggerTurn: true, deliverAs: "steer" });
+  };
+
+  const showStatus = () => {
+    clearTimeout(statusTimer);
+    statusTimer = undefined;
+    const tasks = kernel?.tasks ?? [];
+    for (const name of activity.keys()) if (!tasks.some((task) => task.name === name)) activity.delete(name);
+    const count = `${tasks.length} bg task${tasks.length === 1 ? "" : "s"}`;
+    const latest = [...activity].at(-1);
+    uiContext?.ui.setStatus(STATUS_KEY, tasks.length === 0 ? undefined : latest ? `${count} · ${latest.join(": ")}` : `${count}: ${tasks.map((task) => task.name).join(", ")}`);
+  };
+
+  /** Record what a background task is doing, for the status line and /bg. */
+  const note = (owner: Owner, text: string) => {
+    const task = kernel?.taskOf(owner);
+    if (task === undefined) return;
+    activity.delete(task);
+    activity.set(task, preview(text.replace(/\s+/g, " "), ACTIVITY_PREVIEW_CHARS));
+    statusTimer ??= setTimeout(showStatus, STATUS_THROTTLE_MS);
   };
 
   const getKernel = (ctx: ExtensionToolContext) =>
@@ -262,8 +307,10 @@ export default function radishCodemode(pi: ExtensionAPI) {
         onTaskDone(report) {
           if (shuttingDown) return;
           flushStore();
-          pendingReports.push(report);
-          reportTimer ??= setTimeout(flushReports, REPORT_BATCH_MS);
+          const byUser = cancelledByUser.delete(report.name) && report.status === "cancelled";
+          pendingReports.push(byUser ? { ...report, error: "Cancelled by the user with /bg" } : report);
+          if (wake) wake();
+          else reportTimer ??= setTimeout(flushReports, REPORT_BATCH_MS);
         },
         onStoreWrite(key, value) {
           if (value === undefined) {
@@ -274,9 +321,8 @@ export default function radishCodemode(pi: ExtensionAPI) {
             storeWrites.delete.delete(key);
           }
         },
-        onTasksChanged(running) {
-          if (shuttingDown) return;
-          uiContext?.ui.setStatus(STATUS_KEY, running.length ? `${running.length} bg task${running.length === 1 ? "" : "s"}: ${running.join(", ")}` : undefined);
+        onTasksChanged() {
+          if (!shuttingDown) showStatus();
         },
       },
     }));
@@ -288,7 +334,7 @@ export default function radishCodemode(pi: ExtensionAPI) {
     if (late.length > 0) items.push({ type: "text", text: "[Printed by earlier scripts after they finished:]" }, ...late, { type: "text", text: "[This script:]" });
     items.push(...layoutOutput(result.output));
     if (result.status === "backgrounded") {
-      items.push({ type: "text", text: `[Still running; it continues as background task "${result.task}". You'll get a message when it finishes, and its exports become globals then. cancel("${result.task}") aborts its signal.]` });
+      items.push({ type: "text", text: `[Still running; it continues as background task "${result.task}". A message arrives when it finishes, so don't sleep or poll for it; its exports become globals then. cancel("${result.task}") aborts its signal.]` });
     } else if (failed) {
       const error = result.status === "aborted" ? "Script aborted: Execution aborted" : (result.error ?? "Script failed");
       items.push({ type: "text", text: `Script error:\n${error}\n\n${callSummary(calls)}` });
@@ -352,8 +398,45 @@ export default function radishCodemode(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("bg", {
+    description: "List codemode background tasks and cancel one; /bg cancel <name> cancels directly",
+    handler: async (args, ctx) => {
+      const cancel = (name: string) => {
+        if (!kernel?.cancel(name)) return ctx.ui.notify(`No running background task "${name}"`, "warning");
+        cancelledByUser.add(name);
+        ctx.ui.notify(`Cancelling ${name}`, "info");
+      };
+      const named = /^cancel\s+(.+)$/.exec(args.trim());
+      if (named) return cancel(named[1]!);
+      const tasks = kernel?.tasks ?? [];
+      if (tasks.length === 0) return ctx.ui.notify("No background tasks", "info");
+      const rows = tasks.map((task) => [task.name, age(task.startedAt), ...(activity.has(task.name) ? [activity.get(task.name)] : [])].join(" · "));
+      if (!ctx.hasUI) return ctx.ui.notify(rows.join("\n"), "info");
+      const picked = await ctx.ui.select("Background tasks (select one to cancel)", rows);
+      if (picked !== undefined) cancel(tasks[rows.indexOf(picked)]!.name);
+    },
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     uiContext = ctx;
+  });
+
+  // A print or json run ends when the agent settles, taking the tasks still running with it. Hold the run
+  // open until one reports, and hand the report over as the reason to continue.
+  pi.on("agent_before_settle", async (event, ctx) => {
+    if (ctx.mode === "tui" || ctx.mode === "rpc" || event.outcome === "aborted") return;
+    if (pendingReports.length === 0 && kernel?.tasks.length) {
+      await new Promise<void>((resolve) => {
+        const limit = setTimeout(resolve, SETTLE_WAIT_MS);
+        wake = () => {
+          clearTimeout(limit);
+          setTimeout(resolve, REPORT_BATCH_MS);
+        };
+      });
+      wake = undefined;
+    }
+    const message = takeReports();
+    if (message) return { entries: [...event.entries, { type: "custom_message" as const, ...message }], continue: true };
   });
 
   // The kernel doesn't follow /tree navigation, so say so instead of letting the model trust stale globals.
@@ -372,8 +455,10 @@ export default function radishCodemode(pi: ExtensionAPI) {
   pi.on("session_shutdown", async (_event, ctx) => {
     shuttingDown = true;
     clearTimeout(reportTimer);
-    reportTimer = undefined;
+    clearTimeout(statusTimer);
+    reportTimer = statusTimer = undefined;
     pendingReports = [];
+    wake?.();
     flushStore();
     const old = kernel;
     kernel = undefined;

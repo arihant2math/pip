@@ -376,6 +376,9 @@ function handle(message: HostMessage) {
       send({ t: "cellDone", cell: message.cell, status: "aborted" });
       break;
     }
+    case "cancel":
+      globals.cancel(message.name);
+      break;
     case "rpcResult": {
       const pending = pendingRpcs.get(message.id);
       if (!pending) break;
