@@ -25,6 +25,7 @@
     "codemode/*.ts",
     "codemode/tests/*.ts",
     "subagents/*.ts",
-    "pi-live/*.ts"
+    "pi-live/*.ts",
+    "gemini-priority/*.ts"
   ]
 }

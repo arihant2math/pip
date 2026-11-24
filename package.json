@@ -12,7 +12,8 @@
     "extensions": [
       "./codemode/index.ts",
       "./subagents/index.ts",
-      "./pi-live/index.ts"
+      "./pi-live/index.ts",
+      "./gemini-priority/index.ts"
     ]
   },
   "peerDependencies": {
